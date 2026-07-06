@@ -1,0 +1,25 @@
+# 再現性ゲート(SPEC §0.5.4)
+# main/develop への push・PR で Pkg.test() を実行する。
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        julia-version: ['1.10', '1']  # 1.10 が最低ライン(§0.5.4)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ matrix.julia-version }}
+      - uses: julia-actions/cache@v2
+      - name: Run tests
+        run: julia --project -e 'using Pkg; Pkg.test()'

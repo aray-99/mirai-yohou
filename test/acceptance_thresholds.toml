@@ -1,0 +1,24 @@
+# 双子実験 E1 の合格しきい値(SPEC §13。事前確定・凍結)
+#
+# このファイルは「値だけを置く場所」であり、ロジック・計算式を書いてはならない
+# (§0.5.8)。変更は必ず DECISIONS.md エントリを伴う docs / test コミットで行う。
+# しきい値の緩和による「合格」は禁止(§13)。
+
+[E1]
+# 観測に近い状態(xi_k, xi_g, xi_tau, xi_p): 同化あり RMSE / 自由ラン RMSE の上限
+rmse_ratio_max = 0.5
+# 隠れ状態 sigma_s: 真値との時間相関の下限
+sigma_s_time_correlation_min = 0.6
+# 隠れ状態 sigma_s: アンサンブル 90% 区間の被覆率の範囲
+coverage_min = 0.80
+coverage_max = 0.98
+# アンサンブル区間の名目確率
+credible_interval = 0.90
+# 塑性変数 tauA: 大ジャンプ後の評価窓(年)
+tauA_window_years = 10
+# ランクヒストグラム平坦性のカイ二乗検定の有意水準
+rank_histogram_alpha = 0.05
+
+[E1b]
+# theta_sig の事後平均の真値からの相対誤差上限(±50%)
+theta_sig_relative_error_max = 0.5

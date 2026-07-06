@@ -1,0 +1,20 @@
+# Julia
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+docs/build/
+LocalPreferences.toml
+
+# 計算スクラッチ・ログ(§0.5.7)
+scratch/
+*.log
+
+# アンサンブル生出力・大容量中間結果(§0.5.7。figures/ の最終図はコミット可)
+experiments/output/
+*.jld2
+*.h5
+
+# 環境固有
+.vscode/
+.DS_Store
+.claude/settings.local.json

@@ -1,0 +1,11 @@
+{
+  "experiment": "M3_fanchart",
+  "regime": "stable",
+  "commit_sha": "f04929c0fef542011187e56188fd34d729dab7a5",
+  "seed": 20260707,
+  "ensemble_size": 100,
+  "dt": 0.01,
+  "t1_years": 50.0,
+  "mean_jumps_per_run": 0.66,
+  "generated_at": "2026-07-07T08:24:01"
+}

@@ -1,4 +1,5 @@
 using MiraiYohou
+using Random
 using Test
 using TOML
 
@@ -19,4 +20,7 @@ const THRESHOLDS = TOML.parsefile(joinpath(@__DIR__, "acceptance_thresholds.toml
     include("test_coordinates.jl")
     include("test_branching.jl")
     include("test_invariants.jl")
+    include("test_jump_map.jl")
+    include("test_hawkes_stat.jl")
+    include("test_reproducibility.jl")
 end

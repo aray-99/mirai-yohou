@@ -13,6 +13,8 @@ include("coordinates.jl")
 include("parameters.jl")
 include("diagnostics.jl")
 include("drift.jl")
+include("diffusion.jl")
+include("jumps.jl")
 include("integrator.jl")
 
 # coordinates (§2/§3)
@@ -31,8 +33,10 @@ export DimensionlessNumbers, dimensionless_numbers
 export branching_ratio, deborah_number, hardening_ratio
 export tfp, output_y, tech_growth, dep_ratio
 
-# drift / integrator (§5/§10)
-export drift!, drift_with_diagnostics!
-export Trajectory, simulate_ode
+# drift / diffusion / jumps / integrator (§5/§6/§10)
+export drift!, drift_with_diagnostics!, diffusion!
+export JumpMode, EndogenousHawkes, ExogenousEvents
+export lam_b, intensity, draw_mark, apply_jump!, JumpEvent, simulate_hawkes
+export Trajectory, simulate_ode, SDEResult, simulate_sde
 
 end # module

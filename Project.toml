@@ -1,0 +1,13 @@
+name = "MiraiYohou"
+uuid = "d29e4820-2e56-458f-b1d6-142012f08d15"
+authors = ["ryota <yara.ryouta193@mail.kyutech.jp>"]
+version = "0.1.0"
+
+[deps]
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
+
+[compat]
+Distributions = "0.25"
+julia = "1.10"

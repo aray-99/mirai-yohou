@@ -6,6 +6,7 @@
 module MiraiYohou
 
 using Distributions
+using LinearAlgebra
 using Random
 using TOML
 
@@ -16,6 +17,9 @@ include("drift.jl")
 include("diffusion.jl")
 include("jumps.jl")
 include("integrator.jl")
+include("observation.jl")
+include("enkf.jl")
+include("weights.jl")
 
 # coordinates (§2/§3)
 export logit, sigmoid, softplus, pluspart
@@ -39,5 +43,12 @@ export JumpMode, EndogenousHawkes, ExogenousEvents
 export lam_b, intensity, draw_mark, apply_jump!, JumpEvent, simulate_hawkes
 export Trajectory, simulate_ode, SDEResult, simulate_sde
 export EnsembleResult, simulate_ensemble, member_seed
+
+# observation / enkf / weights (§9)
+export ObservationSpec, ObservationRecord
+export standard_observations, observation_times, synthesize_observations
+export enkf_analysis!, postprocess_analysis!
+export poisson_logweights, normalize_weights, ess, systematic_resample,
+       resample_if_needed!
 
 end # module

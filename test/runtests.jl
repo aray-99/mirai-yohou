@@ -18,4 +18,5 @@ const THRESHOLDS = TOML.parsefile(joinpath(@__DIR__, "acceptance_thresholds.toml
 
     include("test_coordinates.jl")
     include("test_branching.jl")
+    include("test_invariants.jl")
 end

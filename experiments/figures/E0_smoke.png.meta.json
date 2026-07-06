@@ -1,0 +1,9 @@
+{
+  "experiment": "E0_smoke",
+  "commit_sha": "660b82f155bfa4fdca003254f5c3587c3988d1f9",
+  "seed": null,
+  "parameter_sets": ["stable", "volatile"],
+  "dt": 0.01,
+  "t1_years": 50.0,
+  "generated_at": "2026-07-07T08:12:00"
+}

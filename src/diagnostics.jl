@@ -1,7 +1,23 @@
 # 診断量(SPEC §4・§7)
 #
-# M0 スコープ: 無次元数(De, n, H, theta_sig)の計算とログ出力。
-# y, yhat, lam 等の診断変数は M1 以降で追加する。
+# 診断変数(A, y, mu_T 等)は状態には含めず、毎時刻代数的に計算する。
+# yhat は「ノイズを除いたドリフト部分」として解析的に合成するため、
+# ドリフト計算と一体で src/drift.jl 側で求める(§4)。
+
+"全要素生産性 A(T, phi) = A0 * T^theta_T * exp(theta_phi * phi)(SPEC §4)"
+tfp(l1::L1Params, l2::L2Params, T::Real, phi::Real) =
+    l1.A0 * T^l2.theta_T * exp(l2.theta_phi * phi)
+
+"一人当たり産出 y = A * k^alpha * (h * w)^(1 - alpha)(SPEC §4)"
+output_y(l1::L1Params, A::Real, k::Real, h::Real, w::Real) =
+    A * k^l1.alpha * (h * w)^(1 - l1.alpha)
+
+"技術成長率 mu_T = a_T * softplus(c_T0 + eta_Ty * log(y / y_ref))(SPEC §5 式6)"
+tech_growth(l1::L1Params, l2::L2Params, y::Real) =
+    l2.a_T * softplus(l2.c_T0 + l2.eta_Ty * log(y / l1.y_ref))
+
+"従属人口比率 dep_ratio = (1 - w) / w(SPEC §4)"
+dep_ratio(w::Real) = (1 - w) / w
 
 """
     branching_ratio(l1, l2) -> Float64

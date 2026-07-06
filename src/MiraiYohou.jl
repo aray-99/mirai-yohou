@@ -12,6 +12,8 @@ using TOML
 include("coordinates.jl")
 include("parameters.jl")
 include("diagnostics.jl")
+include("drift.jl")
+include("integrator.jl")
 
 # coordinates (§2/§3)
 export logit, sigmoid, softplus, pluspart
@@ -24,8 +26,13 @@ export IX_P, IX_W, IX_H, IX_K, IX_G, IX_T, IX_PHI, IX_V,
 export L1Params, L2Params, L3Params, ConstantExogenous, ModelParameters
 export build_params, prior_lognormal, l3_priors
 
-# diagnostics (§7)
+# diagnostics (§4/§7)
 export DimensionlessNumbers, dimensionless_numbers
 export branching_ratio, deborah_number, hardening_ratio
+export tfp, output_y, tech_growth, dep_ratio
+
+# drift / integrator (§5/§10)
+export drift!, drift_with_diagnostics!
+export Trajectory, simulate_ode
 
 end # module

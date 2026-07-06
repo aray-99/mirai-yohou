@@ -2,7 +2,7 @@
 
 julia_version = "1.12.6"
 manifest_format = "2.0"
-project_hash = "a6e637f2ea650791b56eb1eb7f866ea8f2d59bc0"
+project_hash = "6b45409e909b8849b83aaf323e1e91404d27b935"
 
 [[deps.Accessors]]
 deps = ["CompositionsBase", "ConstructionBase", "Dates", "InverseFunctions", "MacroTools"]
@@ -195,7 +195,7 @@ uuid = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
 version = "0.5.16"
 
 [[deps.MiraiYohou]]
-deps = ["Distributions", "Random", "TOML"]
+deps = ["Distributions", "LinearAlgebra", "Random", "TOML"]
 path = "."
 uuid = "d29e4820-2e56-458f-b1d6-142012f08d15"
 version = "0.1.0"

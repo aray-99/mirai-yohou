@@ -1,4 +1,5 @@
 using MiraiYohou
+using LinearAlgebra
 using Random
 using Test
 using TOML
@@ -25,4 +26,6 @@ const THRESHOLDS = TOML.parsefile(joinpath(@__DIR__, "acceptance_thresholds.toml
     include("test_reproducibility.jl")
     include("test_regimes.jl")
     include("test_ensemble.jl")
+    include("test_enkf_linear.jl")
+    include("test_poisson_weight.jl")
 end

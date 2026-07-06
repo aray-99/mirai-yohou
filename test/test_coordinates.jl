@@ -38,6 +38,13 @@
     end
 
     @testset "13-variable bulk round-trip" begin
+        # 双子実験の初期条件(§8.4)
+        for regime in (:stable, :volatile)
+            params = build_params(regime)
+            @test length(params.x0) == N_STATE
+            @test from_state(params.x0) ≈ params.x0_nat rtol = 1e-10
+            @test to_state(from_state(params.x0)) ≈ params.x0 atol = 1e-10
+        end
         # 境界近傍を含む合成ベクトル
         x_nat = [0.5, 1e-9, 2.0, 0.7, 1 - 1e-9, 3.0, 0.5, 1.2,
                  1e-6, -2.5, 0.01, 1 - 1e-6, 0.3]

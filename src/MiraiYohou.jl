@@ -10,6 +10,8 @@ using Random
 using TOML
 
 include("coordinates.jl")
+include("parameters.jl")
+include("diagnostics.jl")
 
 # coordinates (§2/§3)
 export logit, sigmoid, softplus, pluspart
@@ -17,5 +19,13 @@ export to_state, from_state, to_state_var, from_state_var
 export N_STATE, STATE_NAMES
 export IX_P, IX_W, IX_H, IX_K, IX_G, IX_T, IX_PHI, IX_V,
        IX_TAU, IX_TAUA, IX_SIG, IX_PP, IX_LAME
+
+# parameters (§8)
+export L1Params, L2Params, L3Params, ConstantExogenous, ModelParameters
+export build_params, prior_lognormal, l3_priors
+
+# diagnostics (§7)
+export DimensionlessNumbers, dimensionless_numbers
+export branching_ratio, deborah_number, hardening_ratio
 
 end # module

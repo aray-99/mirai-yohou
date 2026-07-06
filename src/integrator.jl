@@ -114,3 +114,34 @@ function simulate_sde(params::ModelParameters;
     end
     return SDEResult(Trajectory(ts, X), jumps)
 end
+
+"アンサンブル実行の結果(X は N_STATE × 時刻 × メンバー)"
+struct EnsembleResult
+    t::Vector{Float64}
+    X::Array{Float64,3}
+    jumps::Vector{Vector{JumpEvent}}
+end
+
+"メンバー別シードの導出(決定的。§10「メンバーごとに乱数シード固定」)"
+member_seed(seed::Integer, i::Integer) = seed * 1_000_003 + i
+
+"""
+    simulate_ensemble(params; N=100, seed, kwargs...) -> EnsembleResult
+
+N メンバーのアンサンブルを Threads 並列で実行する(メンバー間は独立、§10)。
+各メンバーの乱数は member_seed(seed, i) で決定的に固定される。
+`kwargs` は simulate_sde にそのまま渡す(t1, dt, mode, xi0 等)。
+"""
+function simulate_ensemble(params::ModelParameters;
+                           N::Integer = 100, seed::Integer, kwargs...)
+    results = Vector{SDEResult}(undef, N)
+    Threads.@threads for i in 1:N
+        results[i] = simulate_sde(params; seed = member_seed(seed, i), kwargs...)
+    end
+    nt = length(results[1].traj.t)
+    X = Array{Float64,3}(undef, N_STATE, nt, N)
+    for i in 1:N
+        X[:, :, i] = results[i].traj.X
+    end
+    return EnsembleResult(results[1].traj.t, X, [r.jumps for r in results])
+end

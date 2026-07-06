@@ -38,5 +38,6 @@ export drift!, drift_with_diagnostics!, diffusion!
 export JumpMode, EndogenousHawkes, ExogenousEvents
 export lam_b, intensity, draw_mark, apply_jump!, JumpEvent, simulate_hawkes
 export Trajectory, simulate_ode, SDEResult, simulate_sde
+export EnsembleResult, simulate_ensemble, member_seed
 
 end # module

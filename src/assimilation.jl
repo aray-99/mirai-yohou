@@ -33,6 +33,14 @@ Base.@kwdef struct AssimConfig
     event_window::Float64 = 0.02     # 週次バッチ近似(#0009)
     ess_ratio::Float64 = 0.5         # ESS < N * ratio で再抽選(§9.3)
     param_noise_sd::Float64 = 0.01   # 状態拡大パラメータの微小ノイズ(/√年)
+    smoother_lag::Float64 = 0.0      # 固定ラグ EnKS のラグ(年)。0 = 平滑化オフ(#0024)
+    smoother_dt::Float64 = 0.1       # 平滑化スナップショットの間隔(年)
+    # 平滑化更新は period ≥ この値の観測を含む解析のみで行う。高頻度観測は
+    # 過去状態への実情報が乏しく、クロス共分散の標本雑音だけが累積するため(#0025)
+    smoother_min_period::Float64 = 2.0
+    # 平滑化で更新する状態行(変数局所化、#0025)。実情報のない変数
+    # (k 等)への雑音蓄積を防ぐ。既定は制度ブロック + 格差。
+    smoother_vars::Vector{Int} = [IX_G, IX_TAU, IX_TAUA, IX_SIG, IX_PP]
 end
 
 "同化ランの結果(X は状態行 × 時刻 × メンバー。拡大時は最終行がパラメータ)"
@@ -42,6 +50,8 @@ struct AssimResult
     ranks::Dict{Symbol,Vector{Int}}      # 解析直前の順位(ランクヒストグラム用)
     ess::Vector{Float64}                 # 各週次窓の ESS
     nresample::Int
+    ts_snap::Vector{Float64}             # EnKS スナップショット時刻(平滑化オフなら空)
+    Xs::Array{Float64,3}                 # 平滑化アンサンブル(行 × スナップ × メンバー)
 end
 
 """
@@ -118,6 +128,18 @@ function run_assimilation(params::ModelParameters, E0::Matrix{Float64},
 
     member_params(i) = augmented ? with_theta_sig(params, exp(E[end, i])) : params
 
+    # 固定ラグ EnKS(#0024): smoother_dt 刻みでスナップショットを保持し、
+    # 解析のたびに現在時刻から smoother_lag 以内のものを同時更新する。
+    smoothing = cfg.smoother_lag > 0
+    snap_steps = max(1, round(Int, cfg.smoother_dt / cfg.dt))
+    snap_ts = Float64[]
+    snaps = Matrix{Float64}[]
+    lag_start = 1                          # ラグ窓内の最初のスナップショット index
+    if smoothing
+        push!(snap_ts, ts[1])
+        push!(snaps, copy(E))
+    end
+
     for step in 1:nsteps
         t = ts[step]
         t_next = ts[step + 1]
@@ -168,6 +190,11 @@ function run_assimilation(params::ModelParameters, E0::Matrix{Float64},
             if npath > 0 || essval < N * cfg.ess_ratio
                 idx = systematic_resample(rngs[1], w)
                 E .= E[:, idx]
+                # メンバー対応を保つため、ラグ窓内のスナップショットも同じ
+                # インデックスで再抽選する(EnKS、#0024)
+                for s in lag_start:length(snaps)
+                    snaps[s] .= snaps[s][:, idx]
+                end
                 fill!(logw, 0.0)
                 nresample += 1
             end
@@ -192,26 +219,57 @@ function run_assimilation(params::ModelParameters, E0::Matrix{Float64},
             R = Diagonal([o.spec.sd^2 for o in batch]) |> Matrix
             hfun = col -> [o.spec.h(view(col, 1:N_STATE)) for o in batch]
 
-            # スプレッド注入(inflation_mode、DECISIONS #0013)
+            # ラグ窓の前進(EnKS。窓外のスナップショットは確定)
+            while smoothing && lag_start <= length(snap_ts) &&
+                  snap_ts[lag_start] < t_next - cfg.smoother_lag
+                lag_start += 1
+            end
+            # 平滑化は疎な観測を含む解析のみ(smoother_min_period)
+            do_smooth = smoothing &&
+                any(o.spec.period >= cfg.smoother_min_period for o in batch)
+            window_snaps = do_smooth ? view(snaps, lag_start:length(snaps)) :
+                           Matrix{Float64}[]
+
+            # スプレッド注入(inflation_mode、DECISIONS #0013)。
+            # 平滑化更新は現在状態と同一のイノベーションで行う(#0024)。
             if cfg.inflation_mode === :rtps
                 spread_prior = ensemble_spread(E)
-                enkf_analysis!(E, yobs, hfun, R; rng = rngs[1], rho_inf = 1.0)
+                enks_analysis!(E, window_snaps, yobs, hfun, R;
+                               rng = rngs[1], rho_inf = 1.0,
+                               smooth_rows = cfg.smoother_vars)
                 alpha = jump_since_analysis ? cfg.rtps_alpha_jump : cfg.rtps_alpha
                 rtps!(E, spread_prior; alpha)
             else
                 rho_base = jump_since_analysis ? cfg.rho_inf_jump : cfg.rho_inf
                 rho = cfg.inflation_mode === :per_time ?
                     rho_base^((t_next - t_last_analysis) / cfg.tau_ref) : rho_base
-                enkf_analysis!(E, yobs, hfun, R; rng = rngs[1], rho_inf = rho)
+                enks_analysis!(E, window_snaps, yobs, hfun, R;
+                               rng = rngs[1], rho_inf = rho,
+                               smooth_rows = cfg.smoother_vars)
             end
             postprocess_analysis!(E)
             jump_since_analysis = false
             t_last_analysis = t_next
         end
 
+        # EnKS スナップショットの追加(解析後の状態、snap_dt 刻み)
+        if smoothing && step % snap_steps == 0
+            push!(snap_ts, t_next)
+            push!(snaps, copy(E))
+        end
+
         X[:, step + 1, :] = E
     end
-    return AssimResult(ts, X, ranks, ess_hist, nresample)
+
+    if smoothing
+        Xs = Array{Float64,3}(undef, n, length(snaps), N)
+        for (s, S) in enumerate(snaps)
+            Xs[:, s, :] = S
+        end
+        return AssimResult(ts, X, ranks, ess_hist, nresample, snap_ts, Xs)
+    end
+    return AssimResult(ts, X, ranks, ess_hist, nresample,
+                       Float64[], Array{Float64,3}(undef, 0, 0, 0))
 end
 
 """

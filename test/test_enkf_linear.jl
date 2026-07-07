@@ -95,6 +95,35 @@
         @test E0rt == Epost
     end
 
+    @testset "enks fixed-lag smoother" begin
+        # 2次元 AR(1): x_{k+1} = 0.9 x_k + q。時刻1のスナップショットを保持し、
+        # 時刻2の観測で平滑化(#0024)
+        rng4 = Xoshiro(41)
+        Nens = 5000
+        S1 = randn(rng4, 2, Nens)                       # 時刻1の状態
+        E2 = 0.9 .* S1 .+ 0.3 .* randn(rng4, 2, Nens)   # 時刻2へ伝播
+        S1b = copy(S1)
+        yobs = [0.5]
+        R1 = fill(0.04, 1, 1)
+
+        # (i) スナップショットなしの enks == enkf(同一 rng シード)
+        Ea = copy(E2); Eb = copy(E2)
+        enkf_analysis!(Ea, yobs, xi -> [xi[1]], R1; rng = Xoshiro(5), rho_inf = 1.0)
+        enks_analysis!(Eb, Matrix{Float64}[], yobs, xi -> [xi[1]], R1;
+                       rng = Xoshiro(5), rho_inf = 1.0)
+        @test Ea == Eb
+
+        # (ii) 平滑化は過去状態の相関成分の分散を減らし、平均を観測方向へ更新
+        var1_before = ensemble_spread(S1b) .^ 2
+        enks_analysis!(E2, [S1b], yobs, xi -> [xi[1]], R1;
+                       rng = Xoshiro(5), rho_inf = 1.0)
+        var1_after = ensemble_spread(S1b) .^ 2
+        @test var1_after[1] < var1_before[1]            # 観測と相関する成分
+        @test isapprox(var1_after[2], var1_before[2]; rtol = 0.05)  # 無相関成分は不変
+        m1 = vec(sum(S1b; dims = 2)) ./ Nens
+        @test 0 < m1[1] < 0.5                            # 事前平均0から観測0.5方向へ
+    end
+
     @testset "postprocess clamps lam_e" begin
         Emod = repeat(build_params(:stable).x0, 1, 4)
         Emod[IX_LAME, :] .= [-0.5, -1e-9, 0.0, 0.3]

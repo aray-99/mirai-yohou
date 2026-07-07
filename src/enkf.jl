@@ -94,6 +94,61 @@ enkf_analysis!(E::AbstractMatrix{Float64}, yobs::Real, hfun_scalar, sd::Real;
                    fill(sd^2, 1, 1); rng, rho_inf)
 
 """
+    enks_analysis!(E, snapshots, yobs, hfun, R; rng, rho_inf=1.0) -> E
+
+固定ラグ EnKS の解析更新(SPEC 追補・DECISIONS #0024)。現在状態 `E` を
+摂動観測 EnKF で更新し、**同一の観測摂動・イノベーション**を用いて過去の
+アンサンブルスナップショット `snapshots`(各 n × N、列=メンバー)も
+クロス共分散 K_s = Cov(x_past, y) (Cyy + R)^{-1} で更新する。
+`snapshots` が空なら enkf_analysis! と同一の更新になる。
+`smooth_rows` を与えると、スナップショットの該当行のみを更新する
+(変数局所化。実情報のない変数への標本雑音蓄積を防ぐ、#0025)。
+"""
+function enks_analysis!(E::AbstractMatrix{Float64},
+                        snapshots::AbstractVector{<:AbstractMatrix{Float64}},
+                        yobs::AbstractVector{Float64}, hfun,
+                        R::AbstractMatrix{Float64};
+                        rng::AbstractRNG, rho_inf::Float64 = 1.0,
+                        smooth_rows::Union{Colon,Vector{Int}} = Colon())
+    N = size(E, 2)
+    m = length(yobs)
+    N > 1 || throw(ArgumentError("ensemble size must be > 1"))
+
+    Yf = Matrix{Float64}(undef, m, N)
+    for j in 1:N
+        Yf[:, j] = hfun(view(E, :, j))
+    end
+    ybar = sum(Yf; dims = 2) ./ N
+    Yp = Yf .- ybar
+    Cyy = (Yp * Yp') ./ (N - 1) .+ R
+
+    # メンバー別イノベーション(観測摂動込み)を一度だけ引き、全ブロックで共有
+    Rchol = cholesky(Symmetric(R)).L
+    innov = Matrix{Float64}(undef, m, N)
+    for j in 1:N
+        innov[:, j] = yobs .+ Rchol * randn(rng, m) .- @view Yf[:, j]
+    end
+
+    # 現在状態の更新
+    xbar = sum(E; dims = 2) ./ N
+    K = ((E .- xbar) * Yp') ./ (N - 1) / Cyy
+    E .+= K * innov
+    if rho_inf != 1.0
+        xbar2 = sum(E; dims = 2) ./ N
+        @. E = xbar2 + rho_inf * (E - xbar2)
+    end
+
+    # 過去スナップショットの平滑化更新(インフレーションなし、行は smooth_rows)
+    for S in snapshots
+        Ssel = view(S, smooth_rows, :)
+        sbar = sum(Ssel; dims = 2) ./ N
+        Ks = ((Ssel .- sbar) * Yp') ./ (N - 1) / Cyy
+        Ssel .+= Ks * innov
+    end
+    return E
+end
+
+"""
     postprocess_analysis!(E) -> E
 
 解析ステップ直後の後処理(SPEC §3/§9.4):

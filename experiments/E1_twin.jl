@@ -1,9 +1,9 @@
-# 双子実験 E1(SPEC §13)
+# 双子実験 E1(SPEC §13 プロトコル v1.1、DECISIONS #0015)
 #
-# 手順: 真値ラン(変動国・固定シード・45年)→ 合成観測 → E1a(状態推定のみ)
-# → E1b(theta_sig 状態拡大)→ 対照の自由ラン → 凍結しきい値
-# (test/acceptance_thresholds.toml)による合格判定。
-# 判定手続きの細部は DECISIONS #0009/#0010 で事前確定済み。
+# 事前凍結した未使用の5 truth シード(acceptance_thresholds.toml の truth_seeds)
+# で真値ラン→合成観測→E1a/E1b/自由ランを反復し、数値指標は中央値・
+# 二値指標は多数決で判定する。数値しきい値は v1.0 から不変。
+# v1.0(単一シード4501)の結果は DECISIONS #0012/#0014 に恒久記録。
 #
 # 実行: julia --project=experiments -t auto experiments/E1_twin.jl
 
@@ -14,157 +14,134 @@ using Random
 using Statistics
 using TOML
 using Dates
+using Logging
 
-const TRUTH_SEED = 4501
-const OBS_SEED = 4502
-const ENS_SEED = 4503
-const FREE_SEED = 4504
-const E1B_SEED = 4505
 const N_ENS = 100
 const T1 = 45.0
 const INIT_SD = 0.3          # 初期アンサンブルの摂動 sd(§13 手順3)
 const THRESH = TOML.parsefile(joinpath(dirname(@__DIR__), "test",
                                        "acceptance_thresholds.toml"))
+const SEEDS = Int.(THRESH["E1"]["protocol"]["truth_seeds"])
+const MAJORITY = THRESH["E1"]["protocol"]["majority_min"]
 
-# --- 評価関数(手続きは DECISIONS #0010) ---
-
-rmse(est::AbstractVector, truth::AbstractVector) =
-    sqrt(mean(abs2, est .- truth))
-
-"アンサンブル平均の時系列(1変数)"
+rmse(est, truth) = sqrt(mean(abs2, est .- truth))
 ens_mean(X, ix) = vec(mean(@view(X[ix, :, :]); dims = 2))
 
-function coverage_sigma_s(X, truth_sig; ci = 0.90)
-    lo, hi = (1 - ci) / 2, 1 - (1 - ci) / 2
-    nt = size(X, 2)
-    hits = 0
-    for k in 1:nt
-        vals = exp.(@view X[IX_SIG, k, :])
-        hits += quantile(vals, lo) <= truth_sig[k] <= quantile(vals, hi)
-    end
-    return hits / nt
-end
+"1シード分の E1a/E1b 指標(シード規約: truth=s, obs=s+1, ens=s+2, free=s+3, e1b=s+4)"
+function run_seed(s::Int, params::ModelParameters, cfg::AssimConfig)
+    truth = simulate_sde(params; seed = s, t1 = T1)
+    event_times = [e.t for e in truth.jumps]
+    ms = [e.m for e in truth.jumps]
+    obs = synthesize_observations(truth.traj, standard_observations(params);
+                                  rng = Xoshiro(s + 1))
+    E0 = params.x0 .+ INIT_SD .* randn(Xoshiro(s + 2), N_STATE, N_ENS)
+    postprocess_analysis!(E0)
 
-"プールした事前ランクの平坦性カイ二乗検定(10ビン、#0010)"
-function rank_histogram_chi2(ranks::Dict{Symbol,Vector{Int}}, N::Int)
-    pooled = reduce(vcat, values(ranks))
-    nbins = 10
-    counts = zeros(Int, nbins)
-    for r in pooled
-        counts[clamp(ceil(Int, r * nbins / (N + 1)), 1, nbins)] += 1
-    end
-    e = length(pooled) / nbins
-    chi2 = sum((c - e)^2 / e for c in counts)
-    crit = quantile(Chisq(nbins - 1), 1 - THRESH["E1"]["rank_histogram_alpha"])
-    return (chi2 = chi2, critical = crit, counts = counts)
-end
+    e1a = run_assimilation(params, copy(E0), obs, event_times; cfg, seed = s + 2)
+    Xfree = free_ensemble(params, E0; cfg, seed = s + 3)
 
-# --- 実験本体 ---
+    m = Dict{Symbol,Any}()
+    for (name, ix) in [(:k, IX_K), (:g, IX_G), (:tau, IX_TAU)]
+        tr = vec(truth.traj.X[ix, :])
+        m[Symbol(:rmse_, name)] =
+            rmse(ens_mean(e1a.X, ix), tr) / rmse(ens_mean(Xfree, ix), tr)
+    end
+
+    truth_sig = exp.(vec(truth.traj.X[IX_SIG, :]))
+    m[:corr_sig] = cor(vec(mean(exp.(e1a.X[IX_SIG, :, :]); dims = 2)), truth_sig)
+    lo, hi = (1 - THRESH["E1"]["credible_interval"]) / 2,
+             1 - (1 - THRESH["E1"]["credible_interval"]) / 2
+    m[:cover_sig] = mean(1:length(truth_sig)) do k
+        vals = exp.(@view e1a.X[IX_SIG, k, :])
+        quantile(vals, lo) <= truth_sig[k] <= quantile(vals, hi)
+    end
+
+    # 較正(v1.1): 全観測の事前90%区間被覆(プールしたランクから計算)
+    pooled = reduce(vcat, values(e1a.ranks))
+    rlo, rhi = lo * (N_ENS + 1), hi * (N_ENS + 1)
+    m[:cover_obs] = mean(r -> rlo <= r <= rhi, pooled)
+
+    # tauA: 最大ジャンプ後 10 年窓(二値、#0010)
+    tstar = event_times[argmax(ms)]
+    win = findall(t -> tstar <= t <= min(tstar + THRESH["E1"]["tauA_window_years"], T1),
+                  truth.traj.t)
+    tauA_true = vec(truth.traj.X[IX_TAUA, :])
+    m[:tauA_assim] = mean(abs.(ens_mean(e1a.X, IX_TAUA)[win] .- tauA_true[win]))
+    m[:tauA_free] = mean(abs.(ens_mean(Xfree, IX_TAUA)[win] .- tauA_true[win]))
+    m[:tauA_pass] = m[:tauA_assim] < m[:tauA_free]
+
+    # E1b: theta_sig 状態拡大(§13 手順4)
+    prior = l3_priors().theta_sig
+    E0b = vcat(copy(E0), reshape(log.(rand(Xoshiro(s + 4), prior, N_ENS)), 1, :))
+    e1b = run_assimilation(params, E0b, obs, event_times; cfg, seed = s + 4,
+                           augmented = true)
+    theta_post = mean(exp.(e1b.X[end, end, :]))
+    m[:theta_rel_err] = abs(theta_post - params.l3.theta_sig) / params.l3.theta_sig
+    m[:theta_post] = theta_post
+    m[:njumps] = length(event_times)
+    return m, (; truth, e1a, Xfree, tstar)
+end
 
 function main()
     figdir = joinpath(@__DIR__, "figures")
     mkpath(figdir)
     params = build_params(:volatile)
-    println("=== E1 twin experiment: ", dimensionless_numbers(params))
+    cfg = AssimConfig(t1 = T1)   # 採用方式: RTPS α=0.7(#0013)
+    println("=== E1 twin experiment v1.1: ", dimensionless_numbers(params))
+    println("seeds = ", SEEDS)
 
-    # 1. 真値ラン(§13 手順1)
-    truth = simulate_sde(params; seed = TRUTH_SEED, t1 = T1)
-    event_times = [e.t for e in truth.jumps]
-    ms = [e.m for e in truth.jumps]
-    println("truth: $(length(event_times)) jumps, max m = $(maximum(ms))")
-
-    # 2. 合成観測(§13 手順2)
-    obs = synthesize_observations(truth.traj, standard_observations(params);
-                                  rng = Xoshiro(OBS_SEED))
-    println("synthesized $(length(obs)) observations")
-
-    # 3. 初期アンサンブル(真値から sd 0.3 の摂動、§13 手順3)
-    rng_ens = Xoshiro(ENS_SEED)
-    E0 = params.x0 .+ INIT_SD .* randn(rng_ens, N_STATE, N_ENS)
-    postprocess_analysis!(E0)
-
-    # E1a: 状態推定のみ(パラメータ真値固定)
-    cfg = AssimConfig(t1 = T1)
-    e1a = run_assimilation(params, copy(E0), obs, event_times;
-                           cfg, seed = ENS_SEED)
-    println("E1a done: $(e1a.nresample) resamples, min ESS = $(minimum(e1a.ess))")
-
-    # 5. 対照: 同化オフの自由ラン(同じ初期アンサンブル)
-    Xfree = free_ensemble(params, E0; cfg, seed = FREE_SEED)
-
-    # --- E1a 合格判定(§13。しきい値は凍結 TOML) ---
-    results = Dict{String,Any}()
-    pass = Dict{String,Bool}()
-
-    # (i) 観測に近い状態の RMSE 比 < 0.5
-    near_obs = [(:xi_k, IX_K), (:xi_g, IX_G), (:xi_tau, IX_TAU), (:xi_p, IX_PP)]
-    for (name, ix) in near_obs
-        tr = vec(truth.traj.X[ix, :])
-        ratio = rmse(ens_mean(e1a.X, ix), tr) / rmse(ens_mean(Xfree, ix), tr)
-        results["rmse_ratio_$name"] = ratio
-        pass["rmse_$name"] = ratio < THRESH["E1"]["rmse_ratio_max"]
+    all_m = Dict{Symbol,Any}[]
+    detail1 = nothing
+    for (i, s) in enumerate(SEEDS)
+        m, detail = with_logger(NullLogger()) do
+            run_seed(s, params, cfg)
+        end
+        i == 1 && (detail1 = detail)
+        push!(all_m, m)
+        println("seed $s: ", join(["$k=$(v isa Bool ? v : round(v, digits=3))"
+                                   for (k, v) in sort(collect(m))], " "))
     end
 
-    # (ii) 隠れ状態 sigma_s: 時間相関 > 0.6、90% 区間被覆率 80〜98%
-    truth_sig = exp.(vec(truth.traj.X[IX_SIG, :]))
-    est_sig = vec(mean(exp.(e1a.X[IX_SIG, :, :]); dims = 2))
-    results["sigma_s_correlation"] = cor(est_sig, truth_sig)
+    med(key) = median([m[key] for m in all_m])
+    pass = Dict{String,Bool}()
+    results = Dict{String,Any}()
+    for name in (:k, :g, :tau)
+        key = Symbol(:rmse_, name)
+        results["rmse_ratio_$(name)_median"] = med(key)
+        pass["rmse_$name"] = med(key) < THRESH["E1"]["rmse_ratio_max"]
+    end
+    results["sigma_s_correlation_median"] = med(:corr_sig)
     pass["sigma_s_correlation"] =
-        results["sigma_s_correlation"] > THRESH["E1"]["sigma_s_time_correlation_min"]
-    results["sigma_s_coverage"] =
-        coverage_sigma_s(e1a.X, truth_sig; ci = THRESH["E1"]["credible_interval"])
+        med(:corr_sig) > THRESH["E1"]["sigma_s_time_correlation_min"]
+    results["sigma_s_coverage_median"] = med(:cover_sig)
     pass["sigma_s_coverage"] =
-        THRESH["E1"]["coverage_min"] <= results["sigma_s_coverage"] <=
-        THRESH["E1"]["coverage_max"]
+        THRESH["E1"]["coverage_min"] <= med(:cover_sig) <= THRESH["E1"]["coverage_max"]
+    results["obs_coverage_median"] = med(:cover_obs)
+    pass["obs_calibration"] =
+        THRESH["E1"]["coverage_min"] <= med(:cover_obs) <= THRESH["E1"]["coverage_max"]
+    ntauA = count(m -> m[:tauA_pass], all_m)
+    results["tauA_pass_count"] = ntauA
+    pass["tauA_updated"] = ntauA >= MAJORITY
+    results["theta_sig_relative_error_median"] = med(:theta_rel_err)
+    pass["e1b_theta_sig"] =
+        med(:theta_rel_err) <= THRESH["E1b"]["theta_sig_relative_error_max"]
 
-    # (iii) 塑性変数 tauA: 最大ジャンプ後 10 年窓で自由ランより誤差減少(#0010)
-    tstar = event_times[argmax(ms)]
-    win = findall(t -> tstar <= t <= min(tstar + THRESH["E1"]["tauA_window_years"], T1),
-                  truth.traj.t)
-    tauA_true = vec(truth.traj.X[IX_TAUA, :])
-    err_assim = mean(abs.(ens_mean(e1a.X, IX_TAUA)[win] .- tauA_true[win]))
-    err_free = mean(abs.(ens_mean(Xfree, IX_TAUA)[win] .- tauA_true[win]))
-    results["tauA_err_assim"] = err_assim
-    results["tauA_err_free"] = err_free
-    pass["tauA_updated"] = err_assim < err_free
-
-    # (iv) ランクヒストグラム平坦性(プール、#0010)
-    rh = rank_histogram_chi2(e1a.ranks, N_ENS)
-    results["rank_chi2"] = rh.chi2
-    results["rank_chi2_critical"] = rh.critical
-    results["rank_counts"] = rh.counts
-    pass["rank_histogram"] = rh.chi2 <= rh.critical
-
-    # 4. E1b: theta_sig 状態拡大(§13 手順4。初期値は事前分布からサンプル)
-    prior = l3_priors().theta_sig
-    E0b = vcat(copy(E0), reshape(log.(rand(Xoshiro(E1B_SEED), prior, N_ENS)), 1, :))
-    e1b = run_assimilation(params, E0b, obs, event_times;
-                           cfg, seed = E1B_SEED, augmented = true)
-    theta_post = mean(exp.(e1b.X[end, end, :]))
-    theta_true = params.l3.theta_sig
-    results["theta_sig_posterior_mean"] = theta_post
-    results["theta_sig_true"] = theta_true
-    rel_err = abs(theta_post - theta_true) / theta_true
-    results["theta_sig_relative_error"] = rel_err
-    pass["e1b_theta_sig"] = rel_err <= THRESH["E1b"]["theta_sig_relative_error_max"]
-
-    # --- 出力 ---
-    println("\n=== acceptance results ===")
+    println("\n=== acceptance (v1.1: median / majority over $(length(SEEDS)) seeds) ===")
     for k in sort(collect(keys(pass)))
         println(rpad(k, 24), pass[k] ? "PASS" : "FAIL")
     end
-    println("\n=== metrics ===")
+    println("\n=== aggregated metrics ===")
     for k in sort(collect(keys(results)))
-        v = results[k]
-        v isa Vector || println(rpad(k, 28), v)
+        println(rpad(k, 34), results[k])
     end
     e1a_pass = all(v for (k, v) in pass if k != "e1b_theta_sig")
     e1b_pass = pass["e1b_theta_sig"]
     println("\nE1a: ", e1a_pass ? "PASS" : "FAIL")
     println("E1b: ", e1b_pass ? "PASS" : "FAIL")
 
-    # 図: 隠れ状態と塑性変数の復元
+    # 図(先頭シードの代表4変数)+ 来歴メタデータ(§0.5.6)
     sha = strip(read(`git -C $(dirname(@__DIR__)) rev-parse HEAD`, String))
+    truth, e1a, Xfree, tstar = detail1.truth, detail1.e1a, detail1.Xfree, detail1.tstar
     panels = [(IX_SIG, "sigma_s (hidden)", x -> exp.(x)),
               (IX_TAUA, "tauA (plastic anchor)", identity),
               (IX_TAU, "tau", x -> sigmoid.(x)),
@@ -175,9 +152,9 @@ function main()
         vals = tf(e1a.X[ix, :, :])
         lo = [quantile(@view(vals[k, :]), 0.05) for k in axes(vals, 1)]
         hi = [quantile(@view(vals[k, :]), 0.95) for k in axes(vals, 1)]
-        med = vec(mean(vals; dims = 2))
-        plot!(plt, e1a.t, med; ribbon = (med .- lo, hi .- med), fillalpha = 0.25,
-              color = :steelblue, lw = 1.2, label = "assimilated")
+        med_t = vec(mean(vals; dims = 2))
+        plot!(plt, e1a.t, med_t; ribbon = (med_t .- lo, hi .- med_t),
+              fillalpha = 0.25, color = :steelblue, lw = 1.2, label = "assimilated")
         plot!(plt, truth.traj.t, tf(vec(truth.traj.X[ix, :]));
               color = :black, lw = 1.2, label = "truth")
         plot!(plt, e1a.t, vec(mean(tf(Xfree[ix, :, :]); dims = 2));
@@ -186,20 +163,18 @@ function main()
         plt
     end
     fig = plot(plts...; layout = (2, 2), size = (1000, 700),
-               plot_title = "E1a twin experiment (volatile, 45y, N=$N_ENS)")
+               plot_title = "E1a twin v1.1 (volatile, 45y, N=$N_ENS, seed $(SEEDS[1]))")
     figpath = joinpath(figdir, "E1a_twin.png")
     savefig(fig, figpath)
 
-    meta = Dict("experiment" => "E1_twin", "commit_sha" => sha,
-                "seeds" => Dict("truth" => TRUTH_SEED, "obs" => OBS_SEED,
-                                "ensemble" => ENS_SEED, "free" => FREE_SEED,
-                                "e1b" => E1B_SEED),
-                "parameter_set" => "volatile", "N" => N_ENS, "t1_years" => T1,
+    meta = Dict("experiment" => "E1_twin_v1.1", "commit_sha" => sha,
+                "truth_seeds" => "$(SEEDS)", "parameter_set" => "volatile",
+                "N" => N_ENS, "t1_years" => T1,
+                "inflation" => "rtps alpha=0.7 (#0013)",
                 "generated_at" => Dates.format(now(), dateformat"yyyy-mm-ddTHH:MM:SS"),
-                "results" => Dict(k => v for (k, v) in results if !(v isa Vector)),
-                "pass" => pass, "E1a_pass" => e1a_pass, "E1b_pass" => e1b_pass)
+                "results" => results, "pass" => pass,
+                "E1a_pass" => e1a_pass, "E1b_pass" => e1b_pass)
     open(figpath * ".meta.json", "w") do io
-        # 依存追加を避けた素朴な JSON 出力
         function j(x)
             x isa Dict ? "{" * join(["\"$k\": $(j(v))" for (k, v) in x], ", ") * "}" :
             x isa Bool ? string(x) :

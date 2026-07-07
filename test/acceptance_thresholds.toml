@@ -4,8 +4,15 @@
 # (§0.5.8)。変更は必ず DECISIONS.md エントリを伴う docs / test コミットで行う。
 # しきい値の緩和による「合格」は禁止(§13)。
 
+[E1.protocol]
+# v1.1(DECISIONS #0015): 未使用シードでの反復判定。数値指標は中央値、
+# 二値指標は多数決(majority_min / n_seeds)。シードは実行前に凍結。
+truth_seeds = [6001, 6002, 6003, 6004, 6005]
+majority_min = 3
+
 [E1]
-# 観測に近い状態(xi_k, xi_g, xi_tau, xi_p): 同化あり RMSE / 自由ラン RMSE の上限
+# 観測に近い状態(xi_k, xi_g, xi_tau): 同化あり RMSE / 自由ラン RMSE の上限
+# (xi_p は可同定性不足のため v1.1 で RMSE 対象から除外 — DECISIONS #0015)
 rmse_ratio_max = 0.5
 # 隠れ状態 sigma_s: 真値との時間相関の下限
 sigma_s_time_correlation_min = 0.6

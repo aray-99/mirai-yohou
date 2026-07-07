@@ -68,6 +68,33 @@
         @test var_after < var_before
     end
 
+    @testset "rtps" begin
+        rng3 = Xoshiro(31)
+        Eprior = randn(rng3, 3, 5000) .* [2.0, 1.0, 0.5]
+        spread_prior = ensemble_spread(Eprior)
+        Epost = copy(Eprior)
+        # 成分1のみ観測で解析(成分3は無相関 → スプレッド不変のはず)
+        enkf_analysis!(Epost, [0.0], xi -> [xi[1]], fill(0.01, 1, 1);
+                       rng = rng3, rho_inf = 1.0)
+        m_before = vec(sum(Epost; dims = 2)) ./ 5000
+        Ertps = copy(Epost)
+        rtps!(Ertps, spread_prior; alpha = 0.5)
+
+        # (i) 平均を変えない
+        @test vec(sum(Ertps; dims = 2)) ./ 5000 ≈ m_before atol = 1e-12
+        # (ii) 緩和後スプレッド = σ_post + α(σ_prior − σ_post)
+        s_post = ensemble_spread(Epost)
+        s_rtps = ensemble_spread(Ertps)
+        @test s_rtps ≈ s_post .+ 0.5 .* (spread_prior .- s_post) rtol = 1e-10
+        # 観測成分は事前と事後の間、非観測成分はほぼ不変
+        @test s_post[1] < s_rtps[1] < spread_prior[1]
+        @test isapprox(s_rtps[3], s_post[3]; rtol = 0.05)
+        # (iii) α = 0 は無効化
+        E0rt = copy(Epost)
+        rtps!(E0rt, spread_prior; alpha = 0.0)
+        @test E0rt == Epost
+    end
+
     @testset "postprocess clamps lam_e" begin
         Emod = repeat(build_params(:stable).x0, 1, 4)
         Emod[IX_LAME, :] .= [-0.5, -1e-9, 0.0, 0.3]

@@ -47,9 +47,44 @@ function enkf_analysis!(E::AbstractMatrix{Float64}, yobs::AbstractVector{Float64
     end
 
     # 乗法的インフレーション(§9.2。解析後の平均まわり)
-    xbar2 = sum(E; dims = 2) ./ N
-    @. E = xbar2 + rho_inf * (E - xbar2)
+    if rho_inf != 1.0
+        xbar2 = sum(E; dims = 2) ./ N
+        @. E = xbar2 + rho_inf * (E - xbar2)
+    end
     return E
+end
+
+"""
+    rtps!(E, spread_prior; alpha) -> E
+
+RTPS(relaxation to prior spread、§9.2 改訂・DECISIONS #0013)。
+解析後のアンサンブル偏差の成分別スプレッド σ_post を、解析前の
+スプレッド σ_prior へ割合 `alpha` だけ緩和する:
+新偏差 = 偏差 × (σ_post + α(σ_prior − σ_post)) / σ_post。
+観測に拘束されない成分は σ_post = σ_prior のため変化せず、
+乗法的インフレーションのような弱観測部分空間の複利膨張が起きない。
+"""
+function rtps!(E::AbstractMatrix{Float64}, spread_prior::AbstractVector{Float64};
+               alpha::Float64)
+    alpha == 0.0 && return E
+    N = size(E, 2)
+    xbar = sum(E; dims = 2) ./ N
+    for i in axes(E, 1)
+        s_post = sqrt(sum(abs2, @view(E[i, :]) .- xbar[i]) / (N - 1))
+        s_post > 0 || continue
+        c = (s_post + alpha * (spread_prior[i] - s_post)) / s_post
+        for j in axes(E, 2)
+            E[i, j] = xbar[i] + c * (E[i, j] - xbar[i])
+        end
+    end
+    return E
+end
+
+"成分別アンサンブルスプレッド(RTPS の事前保存用)"
+function ensemble_spread(E::AbstractMatrix{Float64})
+    N = size(E, 2)
+    xbar = sum(E; dims = 2) ./ N
+    return [sqrt(sum(abs2, @view(E[i, :]) .- xbar[i]) / (N - 1)) for i in axes(E, 1)]
 end
 
 "スカラー観測での解析更新(逐次・非同期同化 §9.2 の1ステップ)"

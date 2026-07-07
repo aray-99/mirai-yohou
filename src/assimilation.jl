@@ -8,13 +8,28 @@
 # - 乗法的インフレーション 1.02 常時、強制ジャンプ直後の解析は 1.05(§9.3)。
 # - E1b: theta_sig を log 座標で状態拡大(行 14。d(param)=0+微小ノイズ、§8.3)。
 
-"同化の設定(既定値は SPEC §9/§13)"
+"""
+同化の設定(既定値は SPEC §9/§13)。
+
+`inflation_mode`(DECISIONS #0012/#0013):
+- `:per_analysis` — 解析毎に偏差 × rho_inf(SPEC v1.0 の原記述。多レート観測
+  では弱観測部分空間が複利膨張しフィルタ崩壊する — #0012)
+- `:per_time` — 解析時に rho_inf^(Δt_前回解析から / tau_ref)。単位時間あたり
+  注入率を解析頻度から切り離す
+- `:rtps` — relaxation to prior spread(rtps_alpha)。観測に拘束されない
+  成分への注入がゼロで、複利膨張が原理的に起きない
+強制ジャンプ直後の「一時的に強める」(§9.3)は rho_inf_jump / rtps_alpha_jump。
+"""
 Base.@kwdef struct AssimConfig
     t0::Float64 = 0.0
     t1::Float64 = 45.0
     dt::Float64 = 0.01
-    rho_inf::Float64 = 1.02          # 常時インフレーション(§9.2)
+    inflation_mode::Symbol = :rtps   # 採用方式(#0013)。:per_analysis は SPEC v1.0 原案
+    rho_inf::Float64 = 1.02          # 乗法モードの基礎レート(§9.2)
     rho_inf_jump::Float64 = 1.05     # 強制ジャンプ直後(§9.3)
+    tau_ref::Float64 = 0.25          # :per_time の正規化時定数(四半期)
+    rtps_alpha::Float64 = 0.7        # :rtps の緩和係数(#0013 の診断マトリクスで選定)
+    rtps_alpha_jump::Float64 = 0.8   # 強制ジャンプ直後の :rtps 係数
     event_window::Float64 = 0.02     # 週次バッチ近似(#0009)
     ess_ratio::Float64 = 0.5         # ESS < N * ratio で再抽選(§9.3)
     param_noise_sd::Float64 = 0.01   # 状態拡大パラメータの微小ノイズ(/√年)
@@ -95,6 +110,7 @@ function run_assimilation(params::ModelParameters, E0::Matrix{Float64},
     ess_hist = Float64[]
     nresample = 0
     jump_since_analysis = false
+    t_last_analysis = cfg.t0
     ranks = Dict{Symbol,Vector{Int}}()
     sqdt = sqrt(cfg.dt)
 
@@ -169,10 +185,22 @@ function run_assimilation(params::ModelParameters, E0::Matrix{Float64},
             yobs = [o.value for o in batch]
             R = Diagonal([o.spec.sd^2 for o in batch]) |> Matrix
             hfun = col -> [o.spec.h(view(col, 1:N_STATE)) for o in batch]
-            rho = jump_since_analysis ? cfg.rho_inf_jump : cfg.rho_inf
-            enkf_analysis!(E, yobs, hfun, R; rng = rngs[1], rho_inf = rho)
+
+            # スプレッド注入(inflation_mode、DECISIONS #0013)
+            if cfg.inflation_mode === :rtps
+                spread_prior = ensemble_spread(E)
+                enkf_analysis!(E, yobs, hfun, R; rng = rngs[1], rho_inf = 1.0)
+                alpha = jump_since_analysis ? cfg.rtps_alpha_jump : cfg.rtps_alpha
+                rtps!(E, spread_prior; alpha)
+            else
+                rho_base = jump_since_analysis ? cfg.rho_inf_jump : cfg.rho_inf
+                rho = cfg.inflation_mode === :per_time ?
+                    rho_base^((t_next - t_last_analysis) / cfg.tau_ref) : rho_base
+                enkf_analysis!(E, yobs, hfun, R; rng = rngs[1], rho_inf = rho)
+            end
             postprocess_analysis!(E)
             jump_since_analysis = false
+            t_last_analysis = t_next
         end
 
         X[:, step + 1, :] = E

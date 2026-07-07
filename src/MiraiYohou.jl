@@ -48,7 +48,7 @@ export EnsembleResult, simulate_ensemble, member_seed
 # observation / enkf / weights (§9)
 export ObservationSpec, ObservationRecord
 export standard_observations, observation_times, synthesize_observations
-export enkf_analysis!, postprocess_analysis!
+export enkf_analysis!, postprocess_analysis!, rtps!, ensemble_spread
 export poisson_logweights, normalize_weights, ess, systematic_resample,
        resample_if_needed!
 

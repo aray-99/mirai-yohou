@@ -28,4 +28,5 @@ const THRESHOLDS = TOML.parsefile(joinpath(@__DIR__, "acceptance_thresholds.toml
     include("test_ensemble.jl")
     include("test_enkf_linear.jl")
     include("test_poisson_weight.jl")
+    include("test_phaseb.jl")
 end

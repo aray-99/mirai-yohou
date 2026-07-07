@@ -199,3 +199,12 @@
 - 実装判断: (i) softplus を分岐レス形 `max(z,0) + log1p(exp(-|z|))` に書き換える(数値的に従来と同値。Symbolics のトレースは Bool 分岐を通せないため)。(ii) Phase B は純予測(内生 Hawkes)のみ実装し、同化(ExogenousEvents・EnKF)は Phase A の固定刻み経路を維持する(§10 の位置づけどおり)。(iii) drift!/diffusion! 等の引数型を AbstractVector に緩め、シンボリックトレースと JumpProcesses の拡張配列を受け入れる(数値経路は不変)。
 - 理由: §10 の「Phase A と統計的に一致することを確認」を検証可能な事前確定基準に落とし込むもの。トレランスはテスト実行前に本エントリで凍結する。
 - 関連: §5.1 / §10 / §12 / DECISIONS #0019
+
+## [0021] Phase B(VariableRateJump)はスレッド並列で発火しない
+
+- 日付: 2026-07-07
+- 論点: simulate_sde_phaseb を Threads.@threads でアンサンブル実行すると全メンバーのジャンプ数が 0 になる(逐次実行では 6〜13 回/30年で正常)。JumpProcesses v9 の VariableRateJump(連続コールバックによる発火検出)がスレッド安全でないためと推定。
+- 選択肢: (a) 原因を JumpProcesses 内部まで追う (b) Phase B のアンサンブルは逐次実行とし、注意書きを docstring と本エントリに残す
+- 採用: (b)。1ラン ≈ 13ms(コンパイル後)で100メンバー逐次でも ≈1.5秒であり、並列化の必要がない。phaseb_agreement テストも逐次で実行する。
+- 理由: Phase A(自作 thinning)はメンバー独立でスレッド安全(§10 のアンサンブル並列は Phase A の設計)。Phase B の並列化が必要になった時点で Distributed 並列か JumpProcesses の更新を検討する。
+- 関連: §10 / DECISIONS #0020

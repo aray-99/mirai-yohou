@@ -101,6 +101,8 @@ function run_assimilation(params::ModelParameters, E0::Matrix{Float64},
     X = Array{Float64,3}(undef, n, nsteps + 1, N)
     X[:, 1, :] = E
     rngs = [Xoshiro(member_seed(seed, i)) for i in 1:N]
+    # ランク計算専用の独立ストリーム(観測ノイズ抽選が力学の乱数列を乱さないように)
+    rank_rng = Xoshiro(member_seed(seed, 10_000_019))
     f = Vector{Float64}(undef, N_STATE)
     sig = Vector{Float64}(undef, N_STATE)
     dW = Vector{Float64}(undef, N_STATE)
@@ -176,9 +178,13 @@ function run_assimilation(params::ModelParameters, E0::Matrix{Float64},
         # (d) 解析ステップ(この時刻に届いた観測のみ、§9.2)
         if haskey(obs_at, step + 1)
             batch = obs_at[step + 1]
-            # ランク(解析直前の事前アンサンブルに対する観測の順位)
+            # ランク(解析直前の事前アンサンブルに対する観測の順位)。
+            # 観測 = 真値 + ノイズ のため、メンバー側にも観測ノイズ抽選を
+            # 加えるのがランクヒストグラムの標準定義(Hamill 2001、#0017)。
+            # 省くと高頻度観測変数で見かけの過小分散が生じる。
             for o in batch
-                yj = [o.spec.h(view(E, 1:N_STATE, j)) for j in 1:N]
+                yj = [o.spec.h(view(E, 1:N_STATE, j)) + o.spec.sd * randn(rank_rng)
+                      for j in 1:N]
                 push!(get!(ranks, o.spec.name, Int[]),
                       count(<(o.value), yj) + 1)
             end

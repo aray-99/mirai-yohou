@@ -1,14 +1,22 @@
 name = "MiraiYohou"
 uuid = "d29e4820-2e56-458f-b1d6-142012f08d15"
-authors = ["ryota <yara.ryouta193@mail.kyutech.jp>"]
 version = "0.1.0"
+authors = ["ryota <yara.ryouta193@mail.kyutech.jp>"]
 
 [deps]
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+JumpProcesses = "ccbc3e58-028d-4f4c-8cd5-9ae44345cda5"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+SciMLBase = "0bca4576-84f4-4d90-8ffe-ffa030f20462"
+StochasticDiffEq = "789caeaf-c7a9-5a7d-9973-96adeb23e2a0"
+Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 
 [compat]
 Distributions = "0.25"
+JumpProcesses = "9.29.0"
+SciMLBase = "3.31.0"
+StochasticDiffEq = "7.1.1"
+Symbolics = "7.30.0"
 julia = "1.10"

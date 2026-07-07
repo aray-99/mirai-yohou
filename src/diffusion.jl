@@ -8,7 +8,7 @@
 
 状態 `xi`(保持座標)における対角拡散係数を `sig` に書き込む。
 """
-function diffusion!(sig::AbstractVector{Float64}, xi::AbstractVector{Float64},
+function diffusion!(sig::AbstractVector, xi::AbstractVector,
                     params::ModelParameters, t::Real)
     l1, l2 = params.l1, params.l2
     v = exp(xi[IX_V])

@@ -10,6 +10,13 @@ using LinearAlgebra
 using Random
 using TOML
 
+# Phase B(§10): SciML スタック(名前空間つきで使用)
+import JumpProcesses
+import SciMLBase
+import StochasticDiffEq
+import Symbolics
+using SciMLBase: SDEProblem
+
 include("coordinates.jl")
 include("parameters.jl")
 include("diagnostics.jl")
@@ -21,6 +28,7 @@ include("observation.jl")
 include("enkf.jl")
 include("weights.jl")
 include("assimilation.jl")
+include("phaseb.jl")
 
 # coordinates (§2/§3)
 export logit, sigmoid, softplus, pluspart
@@ -54,5 +62,8 @@ export poisson_logweights, normalize_weights, ess, systematic_resample,
 
 # assimilation driver (§9.2/§9.3/§13)
 export AssimConfig, AssimResult, run_assimilation, free_ensemble, with_theta_sig
+
+# Phase B (§10)
+export simulate_sde_phaseb, drift_jacobian_sparsity
 
 end # module

@@ -20,6 +20,7 @@ include("integrator.jl")
 include("observation.jl")
 include("enkf.jl")
 include("weights.jl")
+include("assimilation.jl")
 
 # coordinates (§2/§3)
 export logit, sigmoid, softplus, pluspart
@@ -50,5 +51,8 @@ export standard_observations, observation_times, synthesize_observations
 export enkf_analysis!, postprocess_analysis!
 export poisson_logweights, normalize_weights, ess, systematic_resample,
        resample_if_needed!
+
+# assimilation driver (§9.2/§9.3/§13)
+export AssimConfig, AssimResult, run_assimilation, free_ensemble, with_theta_sig
 
 end # module

@@ -10,8 +10,8 @@
 状態 `xi`(保持座標)におけるドリフトを `f` に書き込み、診断変数
 `(A, y, mu_T, yhat, load)` を返す(SPEC §4/§5)。
 """
-function drift_with_diagnostics!(f::AbstractVector{Float64},
-                                 xi::AbstractVector{Float64},
+function drift_with_diagnostics!(f::AbstractVector,
+                                 xi::AbstractVector,
                                  params::ModelParameters, t::Real)
     l1, l2, exo = params.l1, params.l2, params.exo
 
@@ -78,7 +78,7 @@ end
 
 ドリフトのみを `f` に書き込む(診断値は捨てる)。
 """
-function drift!(f::AbstractVector{Float64}, xi::AbstractVector{Float64},
+function drift!(f::AbstractVector, xi::AbstractVector,
                 params::ModelParameters, t::Real)
     drift_with_diagnostics!(f, xi, params, t)
     return f

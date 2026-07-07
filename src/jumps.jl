@@ -22,7 +22,7 @@ end
 状態依存の基底強度(SPEC §6.1):
 lam_b = lam0 * exp( theta_sig * (sigma_s - 1) + theta_p * p + theta_v * log(v / v0) )
 """
-function lam_b(xi::AbstractVector{Float64}, params::ModelParameters)
+function lam_b(xi::AbstractVector, params::ModelParameters)
     l1, l2, l3 = params.l1, params.l2, params.l3
     sigma_s = exp(xi[IX_SIG])
     p = sigmoid(xi[IX_PP])
@@ -35,7 +35,7 @@ end
 
 全ジャンプ強度 lam = min(lam_bar, lam_b(X) + lam_e)(SPEC §6.1)。
 """
-intensity(xi::AbstractVector{Float64}, params::ModelParameters) =
+intensity(xi::AbstractVector, params::ModelParameters) =
     min(params.l2.lam_bar, lam_b(xi, params) + xi[IX_LAME])
 
 """
@@ -52,7 +52,7 @@ draw_mark(rng::AbstractRNG, params::ModelParameters) =
 ジャンプ写像 Γ を発生直前の状態 `xi` に適用し、解放エネルギー
 m = (1 - rho) * sigma_s^- を返す(SPEC §6.2/§6.3。全て加算)。
 """
-function apply_jump!(xi::AbstractVector{Float64}, rho::Real,
+function apply_jump!(xi::AbstractVector, rho::Real,
                      params::ModelParameters)
     l1, l2 = params.l1, params.l2
     sigma_s_minus = exp(xi[IX_SIG])

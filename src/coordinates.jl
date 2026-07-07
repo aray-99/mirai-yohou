@@ -36,8 +36,9 @@ logit(x) = log(x / (1 - x))
 
 sigmoid(z) = 1 / (1 + exp(-z))
 
-"数値安定な softplus(常に > 0。単調性の保証に使う)"
-softplus(z) = z > 0 ? z + log1p(exp(-z)) : log1p(exp(z))
+"数値安定な softplus(常に > 0。単調性の保証に使う)。
+分岐レス形はシンボリックトレース(Symbolics、#0020)のため。"
+softplus(z) = max(z, zero(z)) + log1p(exp(-abs(z)))
 
 "(a)_+ = max(a, 0)"
 pluspart(a) = max(a, zero(a))

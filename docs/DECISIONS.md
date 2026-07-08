@@ -242,3 +242,13 @@
 - 採用: (i) 平滑化更新は period ≥ smoother_min_period(既定2年)の観測を含む解析に限定、(ii) 更新する状態行を smoother_vars(既定: xi_g, xi_tau, xi_tauA, xi_sig, xi_p の制度ブロック+格差)に限定する変数局所化。E1 設定(v1.1 の5シード、中央値)の結果: lag=5年で k +0.2%(悪化なし)・tauA +1.4%・σ_s +4.9% 改善、lag=2年で k +0.1%・tauA +0.5%・σ_s +7.9%。#0024 基準1を充足。
 - 理由: 平滑化の設計目的(遅延・低頻度観測による塑性変数・隠れ応力の事後改善、PHASE2_DESIGN §6)に更新範囲を一致させるもので、スカラー距離に基づく共分散局所化の変数版として標準的。§9.2 の「局所化不要」はフィルタ更新についての規定であり、数百回の逐次平滑化更新には当てはまらない。
 - 関連: §9.2 / DECISIONS #0024 / docs/PHASE2_DESIGN.md §6
+
+## [0026] ACLED の認証方式と Research access の制約(フェッチャ実装)
+
+- 日付: 2026-07-08
+- 論点: M7 の ACLED スタブ(#0024 基準2)は旧 API キー方式(ACLED_ACCESS_KEY / ACLED_EMAIL)を前提としていたが、現行の ACLED API は OAuth 2.0 password grant に移行しており前提が無効。また、トークン取得成功 = read 権限ではないことが判明(認証と認可が別)。
+- 経緯: 外部リポジトリ <https://github.com/aray-99/acled-client> で認証フローを検証。新規 myACLED アカウントは /oauth/token が 200 を返しても /api/acled/read は 403 になる。サポートへの申請(API & data access)で 2026-07-08 に "Research access" へ昇格し、read 成功を確認済み。
+- 採用: fetch_data.jl の fetch_acled を実装。(i) 認証は ENV["ACLED_USERNAME"] / ["ACLED_PASSWORD"] による password grant(client_id=acled, scope=authenticated、access_token 24時間)。(ii) /api/acled/read を Bearer トークン+limit/page ページングで取得し、event_id_cnty, event_date, year, event_type, sub_event_type, fatalities を `<ISO3>_events.csv` にキャッシュ(来歴サイドカー付き、§0.5.6)。(iii) 年範囲は 2010〜現在(タイのカバレッジ開始に合わせる。日本は東アジア拡張以降のみ)。
+- 制約(M8 の検証期間設計に影響): Research access は (a) 週次集計データは無制限だが、(b) イベント単位の生データは**直近12ヶ月がエンバーゴ**。ヒンドキャスト(2010年代中心、#0023)には支障なし。リアルタイム運用が必要になった場合はティア変更か週次集計 API の利用を再検討する。
+- 理由: #0024 の「キー取得はユーザー側」が完了したため、スタブを実フェッチャに置換するもの。M8(単国ヒンドキャスト)のイベントカタログ・週次カウント生成の前提データを確保する。
+- 関連: §0.5.6 / §14-3 / DECISIONS #0023 / #0024 / docs/PHASE2_DESIGN.md §4 / <https://github.com/aray-99/acled-client>

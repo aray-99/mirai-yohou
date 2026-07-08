@@ -248,7 +248,7 @@
 - 日付: 2026-07-08
 - 論点: M7 の ACLED スタブ(#0024 基準2)は旧 API キー方式(ACLED_ACCESS_KEY / ACLED_EMAIL)を前提としていたが、現行の ACLED API は OAuth 2.0 password grant に移行しており前提が無効。また、トークン取得成功 = read 権限ではないことが判明(認証と認可が別)。
 - 経緯: 外部リポジトリ <https://github.com/aray-99/acled-client> で認証フローを検証。新規 myACLED アカウントは /oauth/token が 200 を返しても /api/acled/read は 403 になる。サポートへの申請(API & data access)で 2026-07-08 に "Research access" へ昇格し、read 成功を確認済み。
-- 採用: fetch_data.jl の fetch_acled を実装。(i) 認証は ENV["ACLED_USERNAME"] / ["ACLED_PASSWORD"] による password grant(client_id=acled, scope=authenticated、access_token 24時間)。(ii) /api/acled/read を Bearer トークン+limit/page ページングで取得し、event_id_cnty, event_date, year, event_type, sub_event_type, fatalities を `<ISO3>_events.csv` にキャッシュ(来歴サイドカー付き、§0.5.6)。(iii) 年範囲は 2010〜現在(タイのカバレッジ開始に合わせる。日本は東アジア拡張以降のみ)。
+- 採用: fetch_data.jl の fetch_acled を実装。(i) 認証は ENV["ACLED_USERNAME"] / ["ACLED_PASSWORD"] による password grant(client_id=acled, scope=authenticated、access_token 24時間)。(ii) /api/acled/read を Bearer トークン+limit/page ページングで取得し、event_id_cnty, event_date, year, disorder_type, event_type, sub_event_type, admin1, fatalities を `<ISO3>_events.csv` にキャッシュ(来歴サイドカー付き、§0.5.6)。admin1・disorder_type は初回取得後に追加(タイの死傷イベントの約85%が深南部4県の慢性反乱であり、国政レベルのジャンプと分離する地理フィルタに必要と判明したため)。(iii) 年範囲は 2010〜現在(タイのカバレッジ開始に合わせる。日本は東アジア拡張以降のみ)。
 - 制約(M8 の検証期間設計に影響): Research access は (a) 週次集計データは無制限だが、(b) イベント単位の生データは**直近12ヶ月がエンバーゴ**。ヒンドキャスト(2010年代中心、#0023)には支障なし。リアルタイム運用が必要になった場合はティア変更か週次集計 API の利用を再検討する。
 - 理由: #0024 の「キー取得はユーザー側」が完了したため、スタブを実フェッチャに置換するもの。M8(単国ヒンドキャスト)のイベントカタログ・週次カウント生成の前提データを確保する。
 - 関連: §0.5.6 / §14-3 / DECISIONS #0023 / #0024 / docs/PHASE2_DESIGN.md §4 / <https://github.com/aray-99/acled-client>

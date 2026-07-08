@@ -103,8 +103,8 @@ end
 const ACLED_TOKEN_URL = "https://acleddata.com/oauth/token"
 const ACLED_READ_URL = "https://acleddata.com/api/acled/read"
 const ACLED_COUNTRY = Dict("JPN" => "Japan", "THA" => "Thailand")
-const ACLED_FIELDS = ["event_id_cnty", "event_date", "year", "event_type",
-                      "sub_event_type", "fatalities"]
+const ACLED_FIELDS = ["event_id_cnty", "event_date", "year", "disorder_type",
+                      "event_type", "sub_event_type", "admin1", "fatalities"]
 
 urlencode(s::AbstractString) =
     join(c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~" ?

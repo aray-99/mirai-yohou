@@ -76,17 +76,29 @@ with_theta_sig(p::ModelParameters, theta::Real) =
 
 """
     run_assimilation(params, E0, obs, event_times; cfg, seed,
-                     augmented=false) -> AssimResult
+                     augmented=false, obs_counts=nothing, count_scale=1.0)
+        -> AssimResult
 
 初期アンサンブル `E0`(n × N。augmented なら n = 14 で最終行 = log theta_sig)
 から §9 のハイブリッド同化(EnKF + ポアソン重み + イベント同期)を実行する。
-週次イベントカウントは `event_times`(真値カタログ)を窓に集計して用いる。
+
+週次イベントカウントの扱い(DECISIONS #0031):
+- 既定(`obs_counts = nothing`): E1 と同じく `event_times`(真値カタログ)を
+  窓に集計して観測カウントとする(モデルジャンプ = 観測イベントが1対1)。
+- 実データ(M8): `obs_counts` に窓別の観測カウント列(窓 k は区間
+  [t0+(k−1)·event_window, t0+k·event_window))を渡す。**負値はデータなし**を
+  意味し、その窓のポアソン重み更新をスキップする(#0031-3)。
+  `count_scale` は報告率 ν(N_w 〜 Poisson(ν·Λ)、#0031-1)。`count_temper` は
+  過分散カウントの尤度テンパリング係数(1/ν 推奨、#0033。既定 1 = 素のポアソン)。
 """
 function run_assimilation(params::ModelParameters, E0::Matrix{Float64},
                           obs::Vector{ObservationRecord},
                           event_times::Vector{Float64};
                           cfg::AssimConfig = AssimConfig(), seed::Integer,
-                          augmented::Bool = false)
+                          augmented::Bool = false,
+                          obs_counts::Union{Nothing, Vector{Int}} = nothing,
+                          count_scale::Float64 = 1.0,
+                          count_temper::Float64 = 1.0)
     n, N = size(E0)
     n == (augmented ? N_STATE + 1 : N_STATE) ||
         throw(DimensionMismatch("E0 has $n rows, augmented=$augmented"))
@@ -162,9 +174,11 @@ function run_assimilation(params::ModelParameters, E0::Matrix{Float64},
             xi = @view E[1:N_STATE, i]
             Lambda[i] += intensity(xi, p_i) * cfg.dt
             drift!(f, xi, p_i, t)
+            guard_sigma_drift!(f)                    # σ_s ガード(#0032)
             diffusion!(sig, xi, p_i, t)
             randn!(rngs[i], dW)
             @. xi += cfg.dt * f + sqdt * sig * dW
+            guard_sigma_state!(xi)
             if augmented   # d(param) = 0 + 微小ノイズ(§8.3)
                 E[end, i] += cfg.param_noise_sd * sqdt * randn(rngs[i])
             end
@@ -172,7 +186,16 @@ function run_assimilation(params::ModelParameters, E0::Matrix{Float64},
 
         # (c) 週次窓の終端: ポアソン重みを累積し、ESS < N/2 で系統再抽選(§9.3)
         if step % wsteps == 0
-            logw .+= poisson_logweights(window_count, Lambda)
+            # 観測カウント: 既定はカタログ集計(E1)、実データでは窓別列(#0031)。
+            # 負値 = データなし窓 → 重み更新スキップ(病的ガードは常時)。
+            widx = step ÷ wsteps
+            observed = obs_counts === nothing ? window_count :
+                       (widx <= length(obs_counts) ? obs_counts[widx] : -1)
+            if observed >= 0
+                # count_temper: 過分散カウントの情報量換算(#0033。既定1 = 素のポアソン)
+                logw .+= count_temper .*
+                         poisson_logweights(observed, count_scale .* Lambda)
+            end
             # 病的メンバーは重みゼロ化して強制再抽選(#0011)。ESS は単一
             # 外れ値では下がらないため、暴走メンバーが強制ジャンプ
             # (m ∝ sigma_s^-)で数値爆発する前に淘汰する必要がある。

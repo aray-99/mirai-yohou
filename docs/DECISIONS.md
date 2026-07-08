@@ -248,7 +248,16 @@
 - 日付: 2026-07-08
 - 論点: M7 の ACLED スタブ(#0024 基準2)は旧 API キー方式(ACLED_ACCESS_KEY / ACLED_EMAIL)を前提としていたが、現行の ACLED API は OAuth 2.0 password grant に移行しており前提が無効。また、トークン取得成功 = read 権限ではないことが判明(認証と認可が別)。
 - 経緯: 外部リポジトリ <https://github.com/aray-99/acled-client> で認証フローを検証。新規 myACLED アカウントは /oauth/token が 200 を返しても /api/acled/read は 403 になる。サポートへの申請(API & data access)で 2026-07-08 に "Research access" へ昇格し、read 成功を確認済み。
-- 採用: fetch_data.jl の fetch_acled を実装。(i) 認証は ENV["ACLED_USERNAME"] / ["ACLED_PASSWORD"] による password grant(client_id=acled, scope=authenticated、access_token 24時間)。(ii) /api/acled/read を Bearer トークン+limit/page ページングで取得し、event_id_cnty, event_date, year, event_type, sub_event_type, fatalities を `<ISO3>_events.csv` にキャッシュ(来歴サイドカー付き、§0.5.6)。(iii) 年範囲は 2010〜現在(タイのカバレッジ開始に合わせる。日本は東アジア拡張以降のみ)。
+- 採用: fetch_data.jl の fetch_acled を実装。(i) 認証は ENV["ACLED_USERNAME"] / ["ACLED_PASSWORD"] による password grant(client_id=acled, scope=authenticated、access_token 24時間)。(ii) /api/acled/read を Bearer トークン+limit/page ページングで取得し、event_id_cnty, event_date, year, disorder_type, event_type, sub_event_type, admin1, fatalities を `<ISO3>_events.csv` にキャッシュ(来歴サイドカー付き、§0.5.6)。admin1・disorder_type は初回取得後に追加(タイの死傷イベントの約85%が深南部4県の慢性反乱であり、国政レベルのジャンプと分離する地理フィルタに必要と判明したため)。(iii) 年範囲は 2010〜現在(タイのカバレッジ開始に合わせる。日本は東アジア拡張以降のみ)。
 - 制約(M8 の検証期間設計に影響): Research access は (a) 週次集計データは無制限だが、(b) イベント単位の生データは**直近12ヶ月がエンバーゴ**。ヒンドキャスト(2010年代中心、#0023)には支障なし。リアルタイム運用が必要になった場合はティア変更か週次集計 API の利用を再検討する。
 - 理由: #0024 の「キー取得はユーザー側」が完了したため、スタブを実フェッチャに置換するもの。M8(単国ヒンドキャスト)のイベントカタログ・週次カウント生成の前提データを確保する。
 - 関連: §0.5.6 / §14-3 / DECISIONS #0023 / #0024 / docs/PHASE2_DESIGN.md §4 / <https://github.com/aray-99/acled-client>
+
+## [0027] p(分極度)系列は V-Dem vdemdata パッケージから自動抽出(手動配置から変更)
+
+- 日付: 2026-07-08
+- 論点: M7(#0024)では p を「V-Dem サイトから手動ダウンロード」とし、ユーザー側作業に割り当てていた。V-Dem は公式 R パッケージ vdemdata(GitHub)で全データセット(vdem.RData、約34MB)を認証なしで配布しており、自動取得・来歴固定が可能。
+- 採用: experiments/data/extract_vdem_p.jl を追加。(i) vdem.RData を GitHub から取得(Git 管理外の scratch にキャッシュ)、(ii) v2cacamps(political polarization)の original-scale 点推定 v2cacamps_osp(0〜4)を **/4 で 0〜1 に正規化**して `<ISO3>_p.csv`(1990〜)を生成、(iii) 来歴サイドカーに vdemdata のデータファイルコミット SHA(v16 リリース、f4dd269、2026-03-17)と測定不確実性系列(v2cacamps_osp_sd / 4。M8 の観測ノイズ R 設計用)を記録。RData/CodecBzip2/DataFrames を experiments 環境に追加(Manifest 固定)。
+- 実測: JPN 36点(1990〜2025、0.13〜0.28)・THA 36点(0.40〜0.98)。安定国/変動国の想定(初期値 p=0.30 / 0.50、§8.4)と整合し、タイは 2013–14・2020年代に上昇。logit 座標でも |ξ| < 4 で §9.4 の警告水準に抵触しない。
+- 理由: 手動配置を自動化することで §0.5.6 の来歴要件(どの版のデータか一意に遡れる)を満たし、V-Dem の年次更新にも --force 再抽出で追従できる。正規化 /4 は測定モデルの original scale の値域(0〜4)による自然な線形写像で、PHASE2_DESIGN §2 の「0〜1 に正規化」を具体化するもの。tau(WVS)は登録ダウンロードが必要なため引き続きユーザー側作業。
+- 関連: §0.5.6 / DECISIONS #0023 / #0024 / #0026 / docs/PHASE2_DESIGN.md §2

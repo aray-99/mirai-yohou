@@ -72,9 +72,18 @@ function load_series(csvpath::String)
 end
 
 """
-tau(制度信頼)ローダ: World Values Survey の信頼設問(国・波別集計)を
-手動で experiments/data/raw/<ISO3>_tau.csv(year,value。value は 0〜1)に
-置く。WVS は https://www.worldvaluessurvey.org からの登録ダウンロード。
+tau(制度信頼)ローダ: World Values Survey の政府信頼設問を国・波別に集計し、
+手動で experiments/data/raw/<ISO3>_tau.csv(year,value。value は 0〜1)に置く。
+
+作成手順(ユーザー側作業):
+- 設問: E069_11 "Confidence: The Government"。
+  value = (A great deal + Quite a lot の回答割合) / 有効回答(0〜1)。
+  year = 各波のフィールドワーク年(日本: 1981/1990/1995/2000/2005/2010/2019、
+  タイ: 2007/2013/2018)。
+- 経路A(登録不要): https://www.worldvaluessurvey.org → Data and Documentation
+  → Online Analysis で国・波ごとに設問の度数表を表示し、割合を転記。
+- 経路B(登録): 同サイトから Time-series (1981-2022) データを登録ダウンロードし、
+  E069_11 を国・波で集計。
 """
 function load_tau(country::String)
     p = joinpath(RAW_DIR, "$(country)_tau.csv")

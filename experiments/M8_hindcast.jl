@@ -126,6 +126,23 @@ function obs_rmse(recs, ts, X, window)
 end
 
 """
+外生入力を実データから推定(§5: b−d+mig と wbar は既知の時間関数。
+ConstantExogenous の枠内で、較正期間の平均成長率・平均 w に固定する)。
+netgrowth = 較正期間の平均 d(log P)/dt、wbar = 較正期間の平均 w。
+"""
+function fit_exogenous(params, recs, calib)
+    zP = sort([(r.t, r.value) for r in recs if r.spec.name === :P &&
+               calib[1] <= r.t < calib[2]])
+    netgrowth = length(zP) >= 2 ?
+        (zP[end][2] - zP[1][2]) / (zP[end][1] - zP[1][1]) : params.exo.netgrowth
+    zw = [r.value for r in recs if r.spec.name === :w && calib[1] <= r.t < calib[2]]
+    wbar = isempty(zw) ? params.exo.wbar : 1 / (1 + exp(-mean(zw)))
+    exo = MiraiYohou.ConstantExogenous(; netgrowth, wbar)
+    return MiraiYohou.ModelParameters(params.regime, params.l1, params.l2,
+                                      params.l3, exo, params.x0_nat, params.x0)
+end
+
+"""
 c_v0 のモーメント初期化(#0031-2): 式(8)の平衡 xi_v ≈ xi_T + c_v0 から、
 較正期間の観測平均で c_v0 ≈ mean(z_v) − mean(z_T)。較正の初期値であり
 凍結値ではない。
@@ -159,8 +176,10 @@ function run_country(country::String; N::Int = 100, seed::Integer = 20260708,
     recs = build_observations(country, params0; t1 = T1)
     println("  観測: $(length(recs)) 点")
     c_v0 = init_c_v0(recs, ccfg.calib)
-    params = build_params(ccfg.regime; c_v0)
-    println("  c_v0 初期値(モーメント法) = ", round(c_v0, digits = 2))
+    params = fit_exogenous(build_params(ccfg.regime; c_v0), recs, ccfg.calib)
+    println("  c_v0 初期値(モーメント法) = ", round(c_v0, digits = 2),
+            "  外生: netgrowth = ", round(params.exo.netgrowth, digits = 4),
+            " wbar = ", round(params.exo.wbar, digits = 3))
 
     cfg = AssimConfig(t0 = 0.0, t1 = smoke ? ccfg.calib[2] : T1,
                       smoother_lag = 5.0)

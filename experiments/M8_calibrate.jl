@@ -52,7 +52,8 @@ function calib_inputs(country; N, seed)
                       tauA_pseudo_sd_mult = 3.0,                     # #0036
                       analysis_masked_vars = [IX_TAUA],               # #0040-(α)
                       analysis_unmask_names = [:tau, :tauA_pseudo],   # #0040-(α)
-                      rtps_alpha = 0.85)                              # #0040-(β)
+                      rtps_alpha = 0.85,                              # #0040-(β)
+                      obs_spread_floor_frac = 0.5)                    # #0043
     E0 = initial_ensemble(country, params0, recs; N, seed = seed + 1)
     obs_counts = build_obs_counts(country, cfg)
     event_times = filter(t -> t < cfg.t1, build_forced_jumps(country))

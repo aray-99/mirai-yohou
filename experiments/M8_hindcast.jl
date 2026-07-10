@@ -310,7 +310,8 @@ function run_country(country::String; N::Int = 100, seed::Integer = 20260708,
                       tauA_pseudo_sd_mult = 3.0,                     # #0036
                       analysis_masked_vars = [IX_TAUA],               # #0040-(α)
                       analysis_unmask_names = [:tau, :tauA_pseudo],   # #0040-(α)
-                      rtps_alpha = 0.85)                              # #0040-(β)
+                      rtps_alpha = 0.85,                              # #0040-(β)
+                      obs_spread_floor_frac = 0.5)                    # #0043
     E0 = initial_ensemble(country, params, recs; N, seed = seed + 1)
     obs_counts = build_obs_counts(country, cfg)
     ncov = count(>=(0), obs_counts)

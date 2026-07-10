@@ -95,3 +95,82 @@ end
         @test MiraiYohou.select_masked_rows(cfg, batch_other) == [IX_TAUA]
     end
 end
+
+@testset "obs spread floor (#0043)" begin
+    _sd(v) = sqrt(sum(abs2, v .- (sum(v) / length(v))) / (length(v) - 1))
+    N = 8000
+    spec_tau = ObservationSpec(:tau, 3.0, 0.15, xi -> xi[IX_TAU], IX_TAU)   # sd=0.15
+    spec_pp  = ObservationSpec(:p, 2.0, 0.10, xi -> xi[IX_PP], IX_PP)       # sd=0.10
+    spec_synth = ObservationSpec(:log_y, 0.25, 0.01, xi -> xi[IX_T])       # target_ix既定=0
+
+    make_E() = begin
+        rng = Xoshiro(1)
+        E = zeros(N_STATE, N)
+        E[IX_TAU, :] .= 0.01 .* randn(rng, N)   # sd ≈ 0.01 ≪ floor=0.075
+        E[IX_PP, :]  .= 0.5 .+ 0.5 .* randn(rng, N)  # sd ≈ 0.5 ≫ floor=0.05
+        E
+    end
+
+    @testset "既定(0.0)は従来同一(no-op)" begin
+        rng = Xoshiro(2)
+        E = make_E()
+        E0 = copy(E)
+        batch = [ObservationRecord(1.0, spec_tau, 0.0)]
+        MiraiYohou.apply_obs_spread_floor!(E, batch, 0.0, rng)
+        @test E == E0
+    end
+
+    @testset "床未満の行は sd ≈ floor まで拡大される" begin
+        rng = Xoshiro(3)
+        E = make_E()
+        batch = [ObservationRecord(1.0, spec_tau, 0.0)]
+        MiraiYohou.apply_obs_spread_floor!(E, batch, 0.5, rng)
+        floor = 0.5 * spec_tau.sd
+        sd_after = _sd(E[IX_TAU, :])
+        @test isapprox(sd_after, floor; rtol = 0.08)
+    end
+
+    @testset "床以上の行は不変" begin
+        rng = Xoshiro(4)
+        E = make_E()
+        row_before = copy(E[IX_PP, :])
+        batch = [ObservationRecord(1.0, spec_pp, 0.0)]
+        MiraiYohou.apply_obs_spread_floor!(E, batch, 0.5, rng)
+        @test E[IX_PP, :] == row_before
+    end
+
+    @testset "target_ix = 0(合成観測)は対象外" begin
+        rng = Xoshiro(5)
+        E = zeros(N_STATE, N)
+        E[IX_T, :] .= 0.001 .* randn(rng, N)   # 極小スプレッド
+        row_before = copy(E[IX_T, :])
+        batch = [ObservationRecord(1.0, spec_synth, 0.0)]
+        MiraiYohou.apply_obs_spread_floor!(E, batch, 0.5, rng)
+        @test E[IX_T, :] == row_before
+    end
+
+    @testset "同一行を対象にする複数観測は床の大きい方1回のみ" begin
+        rng = Xoshiro(6)
+        E = zeros(N_STATE, N)
+        E[IX_TAU, :] .= 0.01 .* randn(rng, N)
+        spec_small = ObservationSpec(:tau_small, 3.0, 0.05, xi -> xi[IX_TAU], IX_TAU)
+        spec_big   = ObservationSpec(:tau_big, 3.0, 0.15, xi -> xi[IX_TAU], IX_TAU)
+        batch = [ObservationRecord(1.0, spec_small, 0.0),
+                 ObservationRecord(1.0, spec_big, 0.0)]
+        MiraiYohou.apply_obs_spread_floor!(E, batch, 0.5, rng)
+        sd_after = _sd(E[IX_TAU, :])
+        @test isapprox(sd_after, 0.5 * spec_big.sd; rtol = 0.08)
+    end
+
+    @testset "augmented 構成(14行)でも theta_sig 行に触れない" begin
+        rng = Xoshiro(7)
+        E = zeros(N_STATE + 1, N)
+        E[IX_TAU, :] .= 0.01 .* randn(rng, N)
+        E[end, :] .= 1.23 .+ 0.001 .* randn(rng, N)
+        row_before = copy(E[end, :])
+        batch = [ObservationRecord(1.0, spec_tau, 0.0)]
+        MiraiYohou.apply_obs_spread_floor!(E, batch, 0.5, rng)
+        @test E[end, :] == row_before
+        @test size(E, 1) == N_STATE + 1
+    end
+end

@@ -118,7 +118,10 @@ function build_observations(country::String, params; t1::Float64)
             end
             h = s.target === :log_y ? _h_logy(params) :
                 (ix -> (xi -> xi[ix]))(s.target)
-            spec = ObservationSpec(Symbol(s.var), 1.0, sd, h)
+            # target_ix(DECISIONS #0043): 恒等写像の実データ観測のみ状態行を記録
+            # (:log_y のような合成観測は 0 のまま = スプレッド床の対象外)。
+            target_ix = s.target === :log_y ? 0 : s.target
+            spec = ObservationSpec(Symbol(s.var), 1.0, sd, h, target_ix)
             push!(records, ObservationRecord(t, spec, z))
         end
     end

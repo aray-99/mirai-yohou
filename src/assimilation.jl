@@ -54,6 +54,12 @@ Base.@kwdef struct AssimConfig
     # analysis_masked_vars のマスクを解除する観測名(#0040-(α))。解析バッチに
     # この name の観測が1つでも含まれればマスクを解除する。
     analysis_unmask_names::Vector{Symbol} = Symbol[]
+    # 観測座標の加法的スプレッド下限(DECISIONS #0043)。解析直前の事前
+    # アンサンブルで、観測座標(target_ix ≠ 0 の恒等写像観測に限る)の sd が
+    # floor = このスカラー × 観測 sd を下回る場合、対応する状態行へ独立
+    # ガウス摂動を加えて sd を floor まで回復してから解析する。既定 0.0 =
+    # オフ(後方互換)。ゲイン消失(#0042-1)への対処。
+    obs_spread_floor_frac::Float64 = 0.0
 end
 
 "同化ランの結果(X は状態行 × 時刻 × メンバー。拡大時は最終行がパラメータ)"
@@ -95,6 +101,45 @@ function select_masked_rows(cfg::AssimConfig, batch::AbstractVector{ObservationR
     isempty(cfg.analysis_masked_vars) && return Int[]
     any(o.spec.name in cfg.analysis_unmask_names for o in batch) && return Int[]
     return cfg.analysis_masked_vars
+end
+
+"""
+    apply_obs_spread_floor!(E, batch, floor_frac, rng) -> E
+
+観測座標の加法的スプレッド床(DECISIONS #0043)。`floor_frac <= 0` は
+no-op(既定・後方互換)。`batch` 内の各観測について、`target_ix == 0`
+(合成観測、恒等写像でない h)は対象外。恒等写像観測(`target_ix != 0`)は
+事前アンサンブル `E` での観測座標の sd を評価し、`floor = floor_frac *
+o.spec.sd` を下回れば、対応する状態行(`E` の 1:N_STATE 内、augmented でも
+theta_sig 行には触れない)へ独立ガウス摂動 N(0, floor² − sd²) を全メンバー
+独立に加える。同一バッチで複数観測が同じ状態行を対象にする場合は、
+必要な追加分散が最大の1回のみ適用する(二重加算を避ける)。
+`rng` は呼び出し側(run_assimilation の既存ストリーム)から渡す。
+"""
+function apply_obs_spread_floor!(E::AbstractMatrix{Float64},
+                                 batch::AbstractVector{ObservationRecord},
+                                 floor_frac::Float64, rng::AbstractRNG)
+    floor_frac > 0 || return E
+    N = size(E, 2)
+    extra_var = Dict{Int,Float64}()   # 状態行 → 追加分散(バッチ内最大)
+    for o in batch
+        ix = o.spec.target_ix
+        ix == 0 && continue
+        z = [o.spec.h(view(E, 1:N_STATE, j)) for j in 1:N]
+        zbar = sum(z) / N
+        sd = sqrt(sum(abs2, z .- zbar) / (N - 1))
+        floor = floor_frac * o.spec.sd
+        sd < floor || continue
+        v = floor^2 - sd^2
+        extra_var[ix] = max(get(extra_var, ix, 0.0), v)
+    end
+    for (ix, v) in extra_var
+        sdadd = sqrt(v)
+        for j in 1:N
+            E[ix, j] += sdadd * randn(rng)
+        end
+    end
+    return E
 end
 
 "theta_sig を差し替えた ModelParameters(状態拡大メンバー用)"
@@ -260,6 +305,13 @@ function run_assimilation(params::ModelParameters, E0::Matrix{Float64},
             # コピーして追加するため obs_at 由来の元配列は変更しない。
             if cfg.tauA_pseudo_sd_mult > 0
                 batch = augment_tauA_pseudo(batch, cfg.tauA_pseudo_sd_mult)
+            end
+            # 観測座標の事前スプレッド床(DECISIONS #0043、既定オフ)。batch
+            # 確定後・yobs/R/hfun 組み立て前に E を直接摂動するため、以降の
+            # ランク計算・spread_prior(RTPS)・enks_analysis! は全て床適用後の
+            # 実効事前を見る(意図通り: #0043 は解析直前の実効事前の拡大)。
+            if cfg.obs_spread_floor_frac > 0
+                apply_obs_spread_floor!(E, batch, cfg.obs_spread_floor_frac, rngs[1])
             end
             # ランク(解析直前の事前アンサンブルに対する観測の順位)。
             # 観測 = 真値 + ノイズ のため、メンバー側にも観測ノイズ抽選を

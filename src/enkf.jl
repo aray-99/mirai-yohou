@@ -103,13 +103,18 @@ enkf_analysis!(E::AbstractMatrix{Float64}, yobs::Real, hfun_scalar, sd::Real;
 `snapshots` が空なら enkf_analysis! と同一の更新になる。
 `smooth_rows` を与えると、スナップショットの該当行のみを更新する
 (変数局所化。実情報のない変数への標本雑音蓄積を防ぐ、#0025)。
+`masked_rows` を与えると、現在状態 `E` の該当行の更新(K の該当行)を
+ゼロ化する(現在時刻解析の変数局所化、DECISIONS #0040-(α))。既定は
+空 = 従来動作(後方互換)。過去平滑化(snapshots/smooth_rows)側は
+この引数の影響を受けない。
 """
 function enks_analysis!(E::AbstractMatrix{Float64},
                         snapshots::AbstractVector{<:AbstractMatrix{Float64}},
                         yobs::AbstractVector{Float64}, hfun,
                         R::AbstractMatrix{Float64};
                         rng::AbstractRNG, rho_inf::Float64 = 1.0,
-                        smooth_rows::Union{Colon,Vector{Int}} = Colon())
+                        smooth_rows::Union{Colon,Vector{Int}} = Colon(),
+                        masked_rows::Vector{Int} = Int[])
     N = size(E, 2)
     m = length(yobs)
     N > 1 || throw(ArgumentError("ensemble size must be > 1"))
@@ -132,6 +137,9 @@ function enks_analysis!(E::AbstractMatrix{Float64},
     # 現在状態の更新
     xbar = sum(E; dims = 2) ./ N
     K = ((E .- xbar) * Yp') ./ (N - 1) / Cyy
+    if !isempty(masked_rows)
+        K[masked_rows, :] .= 0.0
+    end
     E .+= K * innov
     if rho_inf != 1.0
         xbar2 = sum(E; dims = 2) ./ N

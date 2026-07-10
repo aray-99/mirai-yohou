@@ -124,6 +124,43 @@
         @test 0 < m1[1] < 0.5                            # 事前平均0から観測0.5方向へ
     end
 
+    @testset "enks analysis masked_rows (#0040-(α))" begin
+        # 2次元 AR(1) 玩具問題(強く相関: row2 は row1 の観測に強く反応する
+        # ように相関を作る)。masked_rows で行2の現在時刻更新を無効化できるか。
+        rng5 = Xoshiro(51)
+        Nens = 5000
+        S0 = randn(rng5, 2, Nens)
+        E = copy(S0)
+        E[2, :] .= 0.9 .* E[1, :] .+ 0.1 .* randn(rng5, Nens)   # row2 は row1 と強相関
+        yobs = [0.5]
+        R1 = fill(0.04, 1, 1)
+
+        # (i) masked_rows 既定(空)= 従来動作: 行2も更新される
+        Edefault = copy(E)
+        enks_analysis!(Edefault, Matrix{Float64}[], yobs, xi -> [xi[1]], R1;
+                       rng = Xoshiro(9), rho_inf = 1.0)
+        rowmean(A, i) = sum(@view A[i, :]) / size(A, 2)
+        mbar2_default = rowmean(Edefault, 2)
+        @test mbar2_default > rowmean(E, 2) + 0.05   # 観測方向へ有意に動く
+
+        # (ii) masked_rows = [2]: 行2の現在時刻更新はゼロ化され平均不変
+        Emasked = copy(E)
+        enks_analysis!(Emasked, Matrix{Float64}[], yobs, xi -> [xi[1]], R1;
+                       rng = Xoshiro(9), rho_inf = 1.0, masked_rows = [2])
+        @test rowmean(Emasked, 2) ≈ rowmean(E, 2) atol = 1e-9
+        # 行1(マスクなし)は従来どおり更新される
+        @test rowmean(Emasked, 1) ≈ rowmean(Edefault, 1) atol = 1e-9
+
+        # (iii) 過去平滑化(snapshots)側は masked_rows の影響を受けない
+        Ssnap_a = copy(S0); Ssnap_b = copy(S0)
+        Ea = copy(E); Eb = copy(E)
+        enks_analysis!(Ea, [Ssnap_a], yobs, xi -> [xi[1]], R1;
+                       rng = Xoshiro(9), rho_inf = 1.0)
+        enks_analysis!(Eb, [Ssnap_b], yobs, xi -> [xi[1]], R1;
+                       rng = Xoshiro(9), rho_inf = 1.0, masked_rows = [2])
+        @test Ssnap_a ≈ Ssnap_b atol = 1e-9
+    end
+
     @testset "postprocess clamps lam_e" begin
         Emod = repeat(build_params(:stable).x0, 1, 4)
         Emod[IX_LAME, :] .= [-0.5, -1e-9, 0.0, 0.3]

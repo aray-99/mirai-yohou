@@ -45,6 +45,15 @@ Base.@kwdef struct AssimConfig
     # 同時刻・同値の擬似観測を sd = このスカラー × tau 観測 sd で追加する。
     # 既定 0.0 = オフ(従来動作。E1・既存テストの記録結果を保護)。
     tauA_pseudo_sd_mult::Float64 = 0.0
+    # 現在時刻解析の変数局所化(DECISIONS #0040-(α))。ここに列挙した状態行は、
+    # 解析バッチが analysis_unmask_names のいずれの観測名も含まない場合、
+    # 現在時刻の EnKF 更新(K の該当行)をマスクする。EnKS の smoother_vars/
+    # smooth_rows(過去平滑化の局所化、#0025)と対になる現在時刻側の局所化。
+    # 既定は空 = 従来動作(後方互換)。
+    analysis_masked_vars::Vector{Int} = Int[]
+    # analysis_masked_vars のマスクを解除する観測名(#0040-(α))。解析バッチに
+    # この name の観測が1つでも含まれればマスクを解除する。
+    analysis_unmask_names::Vector{Symbol} = Symbol[]
 end
 
 "同化ランの結果(X は状態行 × 時刻 × メンバー。拡大時は最終行がパラメータ)"
@@ -71,6 +80,21 @@ function pathological(xi::AbstractVector{Float64})
         abs(xi[i]) > 15 && return true
     end
     return xi[IX_SIG] > 3
+end
+
+"""
+    select_masked_rows(cfg, batch) -> Vector{Int}
+
+現在時刻解析の変数局所化(DECISIONS #0040-(α))の対象行を選ぶ。
+`cfg.analysis_masked_vars` が空なら常に `Int[]`(既定・従来動作)。
+非空でも、`batch` に `cfg.analysis_unmask_names` のいずれかの観測名が
+1つでも含まれればマスク解除(`Int[]`)。それ以外は `cfg.analysis_masked_vars`
+をそのまま返す。
+"""
+function select_masked_rows(cfg::AssimConfig, batch::AbstractVector{ObservationRecord})
+    isempty(cfg.analysis_masked_vars) && return Int[]
+    any(o.spec.name in cfg.analysis_unmask_names for o in batch) && return Int[]
+    return cfg.analysis_masked_vars
 end
 
 "theta_sig を差し替えた ModelParameters(状態拡大メンバー用)"
@@ -251,6 +275,9 @@ function run_assimilation(params::ModelParameters, E0::Matrix{Float64},
             R = Diagonal([o.spec.sd^2 for o in batch]) |> Matrix
             hfun = col -> [o.spec.h(view(col, 1:N_STATE)) for o in batch]
 
+            # 現在時刻解析の変数局所化(#0040-(α))
+            masked_rows = select_masked_rows(cfg, batch)
+
             # ラグ窓の前進(EnKS。窓外のスナップショットは確定)
             while smoothing && lag_start <= length(snap_ts) &&
                   snap_ts[lag_start] < t_next - cfg.smoother_lag
@@ -268,7 +295,8 @@ function run_assimilation(params::ModelParameters, E0::Matrix{Float64},
                 spread_prior = ensemble_spread(E)
                 enks_analysis!(E, window_snaps, yobs, hfun, R;
                                rng = rngs[1], rho_inf = 1.0,
-                               smooth_rows = cfg.smoother_vars)
+                               smooth_rows = cfg.smoother_vars,
+                               masked_rows)
                 alpha = jump_since_analysis ? cfg.rtps_alpha_jump : cfg.rtps_alpha
                 rtps!(E, spread_prior; alpha)
             else
@@ -277,7 +305,8 @@ function run_assimilation(params::ModelParameters, E0::Matrix{Float64},
                     rho_base^((t_next - t_last_analysis) / cfg.tau_ref) : rho_base
                 enks_analysis!(E, window_snaps, yobs, hfun, R;
                                rng = rngs[1], rho_inf = rho,
-                               smooth_rows = cfg.smoother_vars)
+                               smooth_rows = cfg.smoother_vars,
+                               masked_rows)
             end
             postprocess_analysis!(E)
             jump_since_analysis = false

@@ -120,6 +120,43 @@ function coverage(recs, ts, X, window; rng)
 end
 
 """
+変数別診断(DECISIONS #0040-(γ)。判定はプール被覆値のみで行い、本関数は
+診断能の追加に限る): 観測名ごとの被覆内訳(hit/n。coverage() と同一の
+90%区間判定を独立乱数で再計算)、事前アンサンブルのスプレッド(sd)平均、
+イノベーション |obs − 事前平均| の平均。
+"""
+function variable_diagnostics(recs, ts, X, window; rng)
+    hits = Dict{Symbol,Int}(); ns = Dict{Symbol,Int}()
+    spreads = Dict{Symbol,Vector{Float64}}(); innovs = Dict{Symbol,Vector{Float64}}()
+    for r in recs
+        window[1] <= r.t < window[2] || continue
+        k = _prior_index(ts, r.t)
+        raw = [r.spec.h(view(X, :, k, j)) for j in 1:size(X, 3)]
+        y = raw .+ r.spec.sd .* randn(rng, length(raw))
+        q05, q95 = quantile(y, 0.05), quantile(y, 0.95)
+        name = r.spec.name
+        hits[name] = get(hits, name, 0) + (q05 <= r.value <= q95)
+        ns[name] = get(ns, name, 0) + 1
+        push!(get!(spreads, name, Float64[]), std(raw))
+        push!(get!(innovs, name, Float64[]), abs(r.value - mean(raw)))
+    end
+    names = union(keys(ns), keys(spreads))
+    return Dict(string(name) => Dict(
+                    "hit" => get(hits, name, 0), "n" => get(ns, name, 0),
+                    "prior_spread_mean" => mean(get(spreads, name, [NaN])),
+                    "prior_innov_mean" => mean(get(innovs, name, [NaN])))
+                for name in names)
+end
+
+"凍結 TOML の meta.decisions(来歴サイドカー用。ファイルが無ければ nothing)"
+function frozen_decisions_string()
+    path = joinpath(@__DIR__, "M8_frozen_config.toml")
+    isfile(path) || return nothing
+    meta = get(TOML.parsefile(path), "meta", Dict())
+    return get(meta, "decisions", nothing)
+end
+
+"""
 1年先予測 RMSE(#0034 基準2): 各観測時刻 s について、同化ランの s−1 時点の
 アンサンブルから純予測(内生 Hawkes・同化なし)で1年間発射し、H(x(s)) の
 アンサンブル平均と観測を比較する。
@@ -270,7 +307,10 @@ function run_country(country::String; N::Int = 100, seed::Integer = 20260708,
     cfg = AssimConfig(t0 = 0.0, t1 = smoke ? ccfg.calib[2] : T1,
                       smoother_lag = 5.0,
                       smoother_vars = [IX_G, IX_TAU, IX_SIG, IX_PP],  # #0036: tauA除外
-                      tauA_pseudo_sd_mult = 3.0)                     # #0036
+                      tauA_pseudo_sd_mult = 3.0,                     # #0036
+                      analysis_masked_vars = [IX_TAUA],               # #0040-(α)
+                      analysis_unmask_names = [:tau, :tauA_pseudo],   # #0040-(α)
+                      rtps_alpha = 0.85)                              # #0040-(β)
     E0 = initial_ensemble(country, params, recs; N, seed = seed + 1)
     obs_counts = build_obs_counts(country, cfg)
     ncov = count(>=(0), obs_counts)
@@ -315,6 +355,29 @@ function run_country(country::String; N::Int = 100, seed::Integer = 20260708,
                 "  自由 ", round(llf, digits = 1),
                 lla > llf ? "  PASS" : "  FAIL")
     end
+
+    # 変数別診断の成果物化(DECISIONS #0040-(γ)。判定・表示はプール被覆値の
+    # ままで変更しない。検証ラン(--calib かつ非 smoke)のみ保存し、smoke
+    # ランでは保存をスキップする)。
+    if !smoke && calibrated
+        diag_vars = variable_diagnostics(recs_run, res.t, res.X, win;
+                                         rng = Xoshiro(seed + 5))
+        diag_out = Dict(
+            "country" => country,
+            "window" => collect(win),
+            "variables" => diag_vars,
+            "provenance" => Dict(
+                "commit" => strip(read(`git -C $(dirname(@__DIR__)) rev-parse HEAD`,
+                                        String)),
+                "seed" => seed,
+                "generated_at" => Dates.format(now(), dateformat"yyyy-mm-ddTHH:MM:SS"),
+                "frozen_decisions" => frozen_decisions_string()))
+        diag_path = joinpath(@__DIR__, "output", "M8_verify_diag_$(country).json")
+        mkpath(dirname(diag_path))
+        write(diag_path, JSON3.write(diag_out))
+        println("  変数別診断: $diag_path")
+    end
+
     return (; res, Xf, recs = recs_run, cfg)
 end
 

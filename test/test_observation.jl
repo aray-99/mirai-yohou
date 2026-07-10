@@ -60,3 +60,38 @@
         @test mean_after < 5.0 - 0.1      # 有意に引かれていること
     end
 end
+
+@testset "select_masked_rows (#0040-(α))" begin
+    spec_tau = ObservationSpec(:tau, 3.0, 0.15, xi -> xi[IX_TAU])
+    spec_pseudo = ObservationSpec(:tauA_pseudo, 3.0, 0.45, xi -> xi[IX_TAUA])
+    spec_other = ObservationSpec(:p, 2.0, 0.10, xi -> xi[IX_PP])
+
+    @testset "既定(analysis_masked_vars 空)は常に無マスク" begin
+        cfg = AssimConfig()
+        @test isempty(cfg.analysis_masked_vars)
+        batch = [ObservationRecord(1.0, spec_other, -0.3)]
+        @test MiraiYohou.select_masked_rows(cfg, batch) == Int[]
+        batch_tau = [ObservationRecord(1.0, spec_tau, 0.2)]
+        @test MiraiYohou.select_masked_rows(cfg, batch_tau) == Int[]
+    end
+
+    @testset "analysis_masked_vars 指定 + unmask 観測なし → マスク適用" begin
+        cfg = AssimConfig(analysis_masked_vars = [IX_TAUA],
+                          analysis_unmask_names = [:tau, :tauA_pseudo])
+        batch = [ObservationRecord(1.0, spec_other, -0.3)]
+        @test MiraiYohou.select_masked_rows(cfg, batch) == [IX_TAUA]
+    end
+
+    @testset "batch に unmask 観測名が含まれれば解除" begin
+        cfg = AssimConfig(analysis_masked_vars = [IX_TAUA],
+                          analysis_unmask_names = [:tau, :tauA_pseudo])
+        batch_tau = [ObservationRecord(1.0, spec_tau, 0.2),
+                     ObservationRecord(1.0, spec_other, -0.3)]
+        @test MiraiYohou.select_masked_rows(cfg, batch_tau) == Int[]
+        batch_pseudo = [ObservationRecord(1.0, spec_pseudo, 0.2)]
+        @test MiraiYohou.select_masked_rows(cfg, batch_pseudo) == Int[]
+        # unmask 対象外の観測のみでは解除されない
+        batch_other = [ObservationRecord(1.0, spec_other, -0.3)]
+        @test MiraiYohou.select_masked_rows(cfg, batch_other) == [IX_TAUA]
+    end
+end

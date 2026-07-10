@@ -20,6 +20,14 @@ Phase 2 設計は docs/PHASE2_DESIGN.md。
 - docs/SPEC.md・DECISIONS の全文読み込みをメインで行わない。必要箇所の抜粋を
   サブエージェントに取らせる。
 
+## 意思決定権限(#0039、2026-07-10 ユーザー委任)
+
+- **手法・是正方針の選択は Fable が自律決定してよい**(個別のユーザー承認不要)。
+  ただし決定と理由は必ず DECISIONS エントリとして**事前に**記録する。
+- 例外(引き続き明示のユーザー承認が必要): 凍結済み合格基準・しきい値の変更。
+  結果を見た後に基準を動かさない原則は不変。
+- マイルストーンの合格認定・main マージ・タグ付与は結果とともに事後報告。
+
 ## 開発運用ルール(SPEC §0.5 の要点。詳細は SPEC 参照)
 
 - Conventional Commits。scope は coordinates/parameters/drift/diffusion/diagnostics/

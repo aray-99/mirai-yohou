@@ -47,7 +47,9 @@ function calib_inputs(country; N, seed)
     ccfg = COUNTRY_CFG[country]
     params0 = build_params(ccfg.regime)
     recs = build_observations(country, params0; t1 = ccfg.calib[2])
-    cfg = AssimConfig(t0 = 0.0, t1 = ccfg.calib[2], smoother_lag = 0.0)
+    cfg = AssimConfig(t0 = 0.0, t1 = ccfg.calib[2], smoother_lag = 0.0,
+                      smoother_vars = [IX_G, IX_TAU, IX_SIG, IX_PP],  # #0036: tauA除外
+                      tauA_pseudo_sd_mult = 3.0)                     # #0036
     E0 = initial_ensemble(country, params0, recs; N, seed = seed + 1)
     obs_counts = build_obs_counts(country, cfg)
     event_times = filter(t -> t < cfg.t1, build_forced_jumps(country))

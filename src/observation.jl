@@ -56,6 +56,30 @@ observation_times(spec::ObservationSpec, t0::Real, t1::Real) =
     collect((t0 + spec.period):spec.period:t1)
 
 """
+    augment_tauA_pseudo(batch, mult) -> Vector{ObservationRecord}
+
+DECISIONS #0036: tau(IX_TAU)への観測が届いた解析バッチに対し、同時刻・同値の
+擬似観測(name = `:tauA_pseudo`, h = xi -> xi[IX_TAUA], sd = mult × tau観測sd)
+を追加した新しいベクトルを返す(`batch` は破壊しない)。`mult <= 0` はオフ
+(既定動作 = 入力をそのまま返す)。tauA の解析更新が tau 観測方向へ緩く
+拘束され、EnKF擬似相関・EnKS遡及更新による無拘束ドリフト(#0035)を抑える。
+"""
+function augment_tauA_pseudo(batch::Vector{ObservationRecord}, mult::Real)
+    mult > 0 || return batch
+    out = copy(batch)
+    tauA_spec_cache = Dict{Float64,ObservationSpec}()
+    for o in batch
+        o.spec.name === :tau || continue
+        sd = mult * o.spec.sd
+        spec = get!(tauA_spec_cache, sd) do
+            ObservationSpec(:tauA_pseudo, o.spec.period, sd, xi -> xi[IX_TAUA])
+        end
+        push!(out, ObservationRecord(o.t, spec, o.value))
+    end
+    return out
+end
+
+"""
     synthesize_observations(truth, specs; rng) -> Vector{ObservationRecord}
 
 真値軌道 `truth::Trajectory` から §9.1 の頻度・ノイズで合成観測列を生成し、

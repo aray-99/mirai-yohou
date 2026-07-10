@@ -268,7 +268,9 @@ function run_country(country::String; N::Int = 100, seed::Integer = 20260708,
             " wbar = ", round(params.exo.wbar, digits = 3))
 
     cfg = AssimConfig(t0 = 0.0, t1 = smoke ? ccfg.calib[2] : T1,
-                      smoother_lag = 5.0)
+                      smoother_lag = 5.0,
+                      smoother_vars = [IX_G, IX_TAU, IX_SIG, IX_PP],  # #0036: tauA除外
+                      tauA_pseudo_sd_mult = 3.0)                     # #0036
     E0 = initial_ensemble(country, params, recs; N, seed = seed + 1)
     obs_counts = build_obs_counts(country, cfg)
     ncov = count(>=(0), obs_counts)

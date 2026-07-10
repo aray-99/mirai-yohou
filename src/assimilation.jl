@@ -41,6 +41,10 @@ Base.@kwdef struct AssimConfig
     # 平滑化で更新する状態行(変数局所化、#0025)。実情報のない変数
     # (k 等)への雑音蓄積を防ぐ。既定は制度ブロック + 格差。
     smoother_vars::Vector{Int} = [IX_G, IX_TAU, IX_TAUA, IX_SIG, IX_PP]
+    # tauA(IX_TAUA)への緩い擬似観測の倍率(DECISIONS #0036)。tau 観測と
+    # 同時刻・同値の擬似観測を sd = このスカラー × tau 観測 sd で追加する。
+    # 既定 0.0 = オフ(従来動作。E1・既存テストの記録結果を保護)。
+    tauA_pseudo_sd_mult::Float64 = 0.0
 end
 
 "同化ランの結果(X は状態行 × 時刻 × メンバー。拡大時は最終行がパラメータ)"
@@ -228,6 +232,11 @@ function run_assimilation(params::ModelParameters, E0::Matrix{Float64},
         # (d) 解析ステップ(この時刻に届いた観測のみ、§9.2)
         if haskey(obs_at, step + 1)
             batch = obs_at[step + 1]
+            # tauA への緩い擬似観測(DECISIONS #0036、既定オフ)。batch を
+            # コピーして追加するため obs_at 由来の元配列は変更しない。
+            if cfg.tauA_pseudo_sd_mult > 0
+                batch = augment_tauA_pseudo(batch, cfg.tauA_pseudo_sd_mult)
+            end
             # ランク(解析直前の事前アンサンブルに対する観測の順位)。
             # 観測 = 真値 + ノイズ のため、メンバー側にも観測ノイズ抽選を
             # 加えるのがランクヒストグラムの標準定義(Hamill 2001、#0017)。

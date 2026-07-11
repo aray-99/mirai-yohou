@@ -32,6 +32,9 @@ Phase 2 設計は docs/PHASE2_DESIGN.md。
 
 - Conventional Commits。scope は coordinates/parameters/drift/diffusion/diagnostics/
   jumps/integrator/observation/enkf/weights/experiments/docs/ci から。
+  **件名は英語**(`type(scope): summary`)、本文は日本語可。DECISIONS 参照は
+  件名でなく本文末尾の `Refs: docs/DECISIONS.md#XXXX` 行に書く(件名の
+  `(#XXXX)` は GitHub の issue/PR 参照と誤読されるため禁止)。
 - feature/<milestone>-<topic> ブランチ → develop へ `--no-ff` マージ。マージ body に
   マイルストーン番号・通過テスト名・DECISIONS ID を必ず記載。main へは
   マイルストーン完了時のみ(vM* タグ)。

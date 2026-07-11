@@ -552,3 +552,66 @@ function free_ensemble(params::ModelParameters, E0::Matrix{Float64};
     end
     return X
 end
+
+"""
+    simulate_sde_augmented(params, augmented_params; seed, t0, t1, dt=0.01, xi0)
+        -> (; t, X, jumps)
+
+拡大パラメータ込みの単一軌道前進(内生 Hawkes、DECISIONS #0053)。
+`run_assimilation` の予測ステップと同一の生成則 — 各ステップで拡大行の
+現在値から `build_member_params` でメンバーパラメータを構築して
+ジャンプ・drift・diffusion を評価し、拡大行を `rw_sd·√dt` のランダム
+ウォークで前進する — を、同化なしの純予報として実行する。M9 の1年先
+予報アンサンブル(拡大事後値を初期値として持ち込み、予報区間中も RW を
+継続する)向け。`augmented_params` が空なら `simulate_sde`(既定モード)と
+同一の乱数消費順序になり、軌道はシード単位で一致する。
+
+`xi0` は長さ `N_STATE + length(augmented_params)`(拡大行はリンク座標)。
+戻り値 `X` も同じ行数(拡大行の軌道を含む)。
+"""
+function simulate_sde_augmented(params::ModelParameters,
+                                augmented_params::Vector{AugmentedParam};
+                                seed::Integer,
+                                t0::Float64 = 0.0, t1::Float64 = 50.0,
+                                dt::Float64 = 0.01,
+                                xi0::AbstractVector{Float64})
+    n = N_STATE + length(augmented_params)
+    length(xi0) == n ||
+        throw(DimensionMismatch("xi0 has $(length(xi0)) rows, expected $n " *
+                                "(N_STATE=$N_STATE + $(length(augmented_params)) augmented params)"))
+    rng = Xoshiro(seed)
+    nsteps = round(Int, (t1 - t0) / dt)
+    ts = collect(range(t0; step = dt, length = nsteps + 1))
+    X = Matrix{Float64}(undef, n, nsteps + 1)
+    jumps = JumpEvent[]
+    x = collect(Float64, xi0)
+    Ecol = reshape(x, :, 1)               # build_member_params 用(メモリ共有)
+    xi = view(x, 1:N_STATE)
+    f = Vector{Float64}(undef, N_STATE)
+    sig = Vector{Float64}(undef, N_STATE)
+    dW = Vector{Float64}(undef, N_STATE)
+    X[:, 1] = x
+    sqdt = sqrt(dt)
+
+    for step in 1:nsteps
+        t = ts[step]
+        t_next = ts[step + 1]
+        p = build_member_params(params, augmented_params, Ecol, N_STATE, 1)
+
+        # (a) 内生ジャンプ(Ogata thinning。現在の拡大値のパラメータで評価)
+        _jumps_in_interval!(xi, t, t_next, p, rng, jumps)
+
+        # (b) EM ステップ(σ_s ガード #0032)+ 拡大行 RW(§8.3/#0046 と同一則)
+        drift!(f, xi, p, t)
+        guard_sigma_drift!(f)
+        diffusion!(sig, xi, p, t)
+        randn!(rng, dW)
+        @. xi += dt * f + sqdt * sig * dW
+        guard_sigma_state!(xi)
+        for (k, ap) in enumerate(augmented_params)
+            x[N_STATE + k] += ap.rw_sd * sqdt * randn(rng)
+        end
+        X[:, step + 1] = x
+    end
+    return (; t = ts, X, jumps)
+end

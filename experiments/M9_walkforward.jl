@@ -21,7 +21,8 @@ using Random
 using Statistics
 using JSON3
 using MiraiYohou: N_STATE, member_seed, run_assimilation, free_ensemble,
-                  AssimConfig, augment_ensemble, simulate_sde, intensity
+                  AssimConfig, augment_ensemble, simulate_sde,
+                  simulate_sde_augmented, AugmentedParam, intensity
 
 include(joinpath(@__DIR__, "M8_calibrate.jl"))   # M8_hindcast.jl も連鎖 include 済み
 
@@ -38,26 +39,33 @@ const M9_ORIGINS = Dict(
 const M9_HORIZON = 1.0    # 1年先予報(#0052)
 
 """
-    forecast_ensemble(params, res; horizon, seed, dt) -> (; t, X)
+    forecast_ensemble(params, aug, res; horizon, seed, dt) -> (; t, X)
 
 同化結果 `res` の最終時刻(オリジン t_k)のアンサンブル状態から、内生 Hawkes
 のみ(強制ジャンプなし・同化なし)で `horizon` 年だけ純粋に前進させる
-1年先予報アンサンブル(#0052)。`forecast_rmse`(M8_hindcast.jl)と同じ
-`simulate_sde` の既定モード(EndogenousHawkes)を使う。
+1年先予報アンサンブル(#0052)。
+
+拡大パラメータ(#0046)の扱いは DECISIONS #0053: メンバーごとの拡大事後値
+(res.X の N_STATE+1 行目以降)を初期値として持ち込み、予報区間中も同一
+rw_sd の RW 過程を継続する(同化サイクルの事前生成と同一の生成則 —
+`simulate_sde_augmented`)。戻り値 `X` は N_STATE+K 行(評価関数は先頭
+N_STATE 行のみ参照するのでそのまま渡せる)。
 """
-function forecast_ensemble(params, res; horizon::Float64 = M9_HORIZON,
+function forecast_ensemble(params, aug::Vector{AugmentedParam}, res;
+                           horizon::Float64 = M9_HORIZON,
                            seed::Integer, dt::Float64 = 0.01)
     N = size(res.X, 3)
+    n = N_STATE + length(aug)
     t0 = res.t[end]
     t1 = t0 + horizon
     nsteps = round(Int, (t1 - t0) / dt)
-    X = Array{Float64,3}(undef, N_STATE, nsteps + 1, N)
-    xi0_all = view(res.X, 1:N_STATE, size(res.X, 2), :)
+    X = Array{Float64,3}(undef, n, nsteps + 1, N)
+    xi0_all = view(res.X, 1:n, size(res.X, 2), :)
     Threads.@threads for j in 1:N
-        sim = simulate_sde(params; seed = member_seed(seed, j),
-                           t0 = t0, t1 = t1, dt = dt,
-                           xi0 = collect(view(xi0_all, :, j)))
-        X[:, :, j] = sim.traj.X
+        sim = simulate_sde_augmented(params, aug; seed = member_seed(seed, j),
+                                     t0 = t0, t1 = t1, dt = dt,
+                                     xi0 = collect(view(xi0_all, :, j)))
+        X[:, :, j] = sim.X
     end
     ts = collect(range(t0; step = dt, length = nsteps + 1))
     return (; t = ts, X)
@@ -112,8 +120,9 @@ function run_origin(country::String, t_k::Real,
                            cfg, seed, obs_counts, count_scale = nu_star,
                            count_temper = 1 / nu_star, augmented_params = aug)
 
-    # (c) 1年先予報アンサンブル
-    fe = forecast_ensemble(params, res; horizon = t_fore_end - t_k, seed = seed + 7)
+    # (c) 1年先予報アンサンブル(拡大事後値の持ち込み + RW 継続、#0053)
+    fe = forecast_ensemble(params, aug, res; horizon = t_fore_end - t_k,
+                           seed = seed + 7)
 
     # 自由ラン基準(同一較正値・同化なし・同区間、#0052)
     cfg_free = AssimConfig(t0 = 0.0, t1 = t_fore_end)

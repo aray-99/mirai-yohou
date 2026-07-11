@@ -139,14 +139,20 @@ function build_obs_counts(country, cfg::AssimConfig)
     return counts
 end
 
-"強制ジャンプ時刻(#0030-3: 較正期間分位のカタログ、週央に配置)"
-function build_forced_jumps(country)
+"""
+強制ジャンプ時刻(#0030-3: 較正期間分位のカタログ、週央に配置)。
+`calib_window` 省略時は国既定の較正窓(#0030-4)。M9(#0052)の expanding
+window では、しきい値を「窓開始〜オリジン t_k」のデータのみから決める
+ために明示的に渡す(呼び出し側で `t < cfg.t1` に事後フィルタするので、
+しきい値算出さえ未来データに触れなければ検証区間への漏洩はない)。
+"""
+function build_forced_jumps(country; calib_window = COUNTRY_CFG[country].calib)
     ccfg = COUNTRY_CFG[country]
     ev = political_events(load_events(country); exclude_admin1 = ccfg.exclude_admin1)
     isempty(ev) && return Float64[]
     ws, c, f = weekly_counts(ev)
-    lo = max(T_EPOCH + Day(round(Int, ccfg.calib[1] * 365.25)), ws[1])
-    hi = T_EPOCH + Day(round(Int, ccfg.calib[2] * 365.25))
+    lo = max(T_EPOCH + Day(round(Int, calib_window[1] * 365.25)), ws[1])
+    hi = T_EPOCH + Day(round(Int, calib_window[2] * 365.25))
     if lo > hi   # ACLED カバレッジが較正期間と重ならない(JPN)→ 強制ジャンプなし
         println("  強制ジャンプ: なし(較正期間にイベントデータなし)")
         return Float64[]
@@ -159,21 +165,27 @@ end
 
 # 評価は「事前(解析前)予測」で行う(#0034)。X[k] は観測時刻の解析後
 # 状態なので、1グリッド前(k−1、O(dt)=3.65日前)の状態を prior の近似に使う。
-_prior_index(ts, t) = clamp(searchsortedlast(ts, t) - 1, 1, length(ts))
+# `lag` は既定1(M8 の従来動作)。M9(#0052)のフリーラン/予報アンサンブルは
+# 解析時刻を含まないため lag=0(直近グリッド点をそのまま使う)で呼ぶ。
+_prior_index(ts, t; lag::Int = 1) = clamp(searchsortedlast(ts, t) - lag, 1, length(ts))
 
-"観測空間の被覆率(事前90%区間、Hamill 定義 #0017 と同じノイズ付加)"
-function coverage(recs, ts, X, window; rng)
+"""
+観測空間の被覆率(事前90%区間、Hamill 定義 #0017 と同じノイズ付加)。
+戻り値は `(frac, n_tot, n_in)`。第3要素 `n_in` は M9(#0052)の
+オリジン間プーリング(hit/n を合算してからプール被覆率を出す)向け。
+"""
+function coverage(recs, ts, X, window; rng, lag::Int = 1)
     n_in = 0; n_tot = 0
     for r in recs
         window[1] <= r.t < window[2] || continue
-        k = _prior_index(ts, r.t)
+        k = _prior_index(ts, r.t; lag)
         y = [r.spec.h(view(X, :, k, j)) + r.spec.sd * randn(rng)
              for j in 1:size(X, 3)]
         q05, q95 = quantile(y, 0.05), quantile(y, 0.95)
         n_in += (q05 <= r.value <= q95)
         n_tot += 1
     end
-    return n_in / max(n_tot, 1), n_tot
+    return n_in / max(n_tot, 1), n_tot, n_in
 end
 
 """
@@ -266,15 +278,25 @@ function count_loglik(ts, X, obs_counts, params, nu, cfg, window)
     return ll, nwin
 end
 
-"観測変数ごとの RMSE(事前アンサンブル平均 vs 観測値)"
-function obs_rmse(recs, ts, X, window)
+"""
+観測変数ごとの生の誤差(事前アンサンブル平均 − 観測値)。M9(#0052)の
+オリジン間プーリング(誤差ベクトルを合算してから RMSE を出す)向けに
+`obs_rmse` から分離した下請け関数。
+"""
+function obs_errors(recs, ts, X, window; lag::Int = 1)
     err = Dict{Symbol, Vector{Float64}}()
     for r in recs
         window[1] <= r.t < window[2] || continue
-        k = _prior_index(ts, r.t)
+        k = _prior_index(ts, r.t; lag)
         m = mean(r.spec.h(view(X, :, k, j)) for j in 1:size(X, 3))
         push!(get!(err, r.spec.name, Float64[]), m - r.value)
     end
+    return err
+end
+
+"観測変数ごとの RMSE(事前アンサンブル平均 vs 観測値)"
+function obs_rmse(recs, ts, X, window; lag::Int = 1)
+    err = obs_errors(recs, ts, X, window; lag)
     return Dict(k => sqrt(mean(abs2, v)) for (k, v) in err)
 end
 
@@ -399,7 +421,7 @@ function run_country(country::String; N::Int = 100, seed::Integer = 20260708,
 
     rng = Xoshiro(seed + 3)
     win = smoke ? ccfg.calib : ccfg.verif
-    cov, ntot = coverage(recs_run, res.t, res.X, win; rng)
+    cov, ntot, _ = coverage(recs_run, res.t, res.X, win; rng)
     println("  [基準1] 被覆率($(win)) = ", round(cov, digits = 3), " (n=$ntot)",
             0.80 <= cov <= 0.98 ? "  PASS" : "  FAIL")
     ra = smoke ? obs_rmse(recs_run, res.t, res.X, win) :

@@ -19,7 +19,8 @@ using MiraiYohou
 using MiraiYohou: build_params, run_assimilation, free_ensemble, AssimConfig,
                   ObservationRecord, member_seed, N_STATE, intensity, simulate_sde,
                   IX_P, IX_W, IX_H, IX_K, IX_G, IX_T, IX_PHI, IX_V,
-                  IX_TAU, IX_TAUA, IX_SIG, IX_PP, IX_LAME, logit
+                  IX_TAU, IX_TAUA, IX_SIG, IX_PP, IX_LAME, logit,
+                  AugmentedParam, augment_ensemble
 
 include(joinpath(@__DIR__, "data", "build_observations.jl"))
 include(joinpath(@__DIR__, "data", "prepare_events.jl"))
@@ -36,6 +37,48 @@ const COUNTRY_CFG = Dict(
 )
 
 const T1 = 35.0                      # 2024 年末まで(ACLED エンバーゴ内)
+
+"""
+駆動パラメータの L3 状態拡大(DECISIONS #0046)の初期スプレッド・RW sd。
+較正窓 smoke でのみ感度確認する暫定値であり、検証ラン前に凍結エントリで
+確定する(#0030-7 の流儀)。**この1箇所を差し替えれば済む**ようにまとめる。
+theta_sig は既存の状態拡大機構(#0010系。E1 と同型)を M8 にも適用したもの、
+残り4個は #0046-1 の被覆崩壊変数対応(P/T_proxy/phi/v/THA g,y の駆動自由度)。
+"""
+const M8_AUG_SETTINGS = (
+    theta_sig = (link = :log,      init_sd = 0.5,   rw_sd = 0.01),
+    netgrowth = (link = :identity, init_sd = 0.003, rw_sd = 0.002),
+    a_T       = (link = :log,      init_sd = 0.1,   rw_sd = 0.05),
+    r_phi     = (link = :log,      init_sd = 0.1,   rw_sd = 0.05),
+    mu_gbar   = (link = :identity, init_sd = 0.1,   rw_sd = 0.05),
+)
+
+"""
+M8 の拡大パラメータ記述子(DECISIONS #0046)を `params`(fit_exogenous・
+較正値適用済み)から構築する。初期値は theta_sig(非較正の L3 既定値)を
+除き較正済み中心(mu_gbar は EKI 較正値、netgrowth は fit_exogenous 値、
+a_T/r_phi は較正対象外なので §8.2 のレジーム既定値)を使う。
+"""
+function build_m8_augmented_params(params::ModelParameters)
+    s = M8_AUG_SETTINGS
+    return AugmentedParam[
+        AugmentedParam(name = :theta_sig, link = s.theta_sig.link,
+                       init = params.l3.theta_sig,
+                       init_sd = s.theta_sig.init_sd, rw_sd = s.theta_sig.rw_sd),
+        AugmentedParam(name = :netgrowth, link = s.netgrowth.link,
+                       init = params.exo.netgrowth,
+                       init_sd = s.netgrowth.init_sd, rw_sd = s.netgrowth.rw_sd),
+        AugmentedParam(name = :a_T, link = s.a_T.link,
+                       init = params.l2.a_T,
+                       init_sd = s.a_T.init_sd, rw_sd = s.a_T.rw_sd),
+        AugmentedParam(name = :r_phi, link = s.r_phi.link,
+                       init = params.l2.r_phi,
+                       init_sd = s.r_phi.init_sd, rw_sd = s.r_phi.rw_sd),
+        AugmentedParam(name = :mu_gbar, link = s.mu_gbar.link,
+                       init = params.l2.mu_gbar,
+                       init_sd = s.mu_gbar.init_sd, rw_sd = s.mu_gbar.rw_sd),
+    ]
+end
 
 """
 初期アンサンブル: 中心 = レジーム既定値(§8.4)を 1990 年観測で上書きし、
@@ -312,7 +355,9 @@ function run_country(country::String; N::Int = 100, seed::Integer = 20260708,
                       analysis_unmask_names = [:tau, :tauA_pseudo],   # #0040-(α)
                       rtps_alpha = 0.85,                              # #0040-(β)
                       obs_spread_floor_frac = 0.5)                    # #0043
-    E0 = initial_ensemble(country, params, recs; N, seed = seed + 1)
+    E0_state = initial_ensemble(country, params, recs; N, seed = seed + 1)
+    aug = build_m8_augmented_params(params)                # #0046
+    E0 = augment_ensemble(E0_state, aug; rng = Xoshiro(seed + 6))
     obs_counts = build_obs_counts(country, cfg)
     ncov = count(>=(0), obs_counts)
     println("  週次窓: $(length(obs_counts))(データあり $ncov)")
@@ -326,9 +371,16 @@ function run_country(country::String; N::Int = 100, seed::Integer = 20260708,
     recs_run = [r for r in recs if r.t <= cfg.t1]
     res = run_assimilation(params, E0, recs_run, event_times;
                            cfg, seed, obs_counts, count_scale = nu,
-                           count_temper = 1 / nu)   # #0033
+                           count_temper = 1 / nu,           # #0033
+                           augmented_params = aug)          # #0046
     println("  同化完了: 再抽選 $(res.nresample) 回, ESS範囲 ",
             round.(extrema(res.ess), digits = 1))
+    for (k, ap) in enumerate(aug)
+        final = res.X[N_STATE + k, end, :]
+        natural = ap.link === :log ? exp.(final) : final
+        println("  拡大パラメータ $(ap.name): 事後平均 ", round(mean(natural), digits = 5),
+                "(初期 ", round(ap.init, digits = 5), ")")
+    end
     Xf = free_ensemble(params, E0; cfg, seed = seed + 2)
 
     rng = Xoshiro(seed + 3)

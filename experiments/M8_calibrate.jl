@@ -75,10 +75,16 @@ function forward_G(inp, theta; N, seed)
     end
     nu = inp.nu0    # 重み付け用の ν(モーメント初期値。プロファイル解は下で計算)
     obs_counts = inp.obs_counts
+    # 拡大パラメータ(#0046)。M8_hindcast.jl の検証ランと同じ機構・数値
+    # (M8_AUG_SETTINGS)を使い、較正と検証の力学を一致させる。初期アンサンブル
+    # の乱数は θ_j 間で共通(seed のみに依存)にして CRN 性を保つ(呼び出し側
+    # は j に依らず同一の seed = seed_it を渡す設計、上記コメント参照)。
+    aug = build_m8_augmented_params(params)
+    E0 = augment_ensemble(inp.E0, aug; rng = Xoshiro(seed))
     res = try
-        run_assimilation(params, inp.E0, recs, inp.event_times;
+        run_assimilation(params, E0, recs, inp.event_times;
                          cfg, seed, obs_counts, count_scale = nu,
-                         count_temper = 1 / nu)
+                         count_temper = 1 / nu, augmented_params = aug)
     catch
         return nothing
     end

@@ -22,7 +22,9 @@ using Statistics
 using JSON3
 using MiraiYohou: N_STATE, member_seed, run_assimilation, free_ensemble,
                   AssimConfig, augment_ensemble, simulate_sde,
-                  simulate_sde_augmented, AugmentedParam, intensity
+                  simulate_sde_augmented, AugmentedParam, intensity,
+                  negbin_logpmf, poisson_logpmf, profile_count_dispersion,
+                  windowed_count_total
 
 include(joinpath(@__DIR__, "M8_calibrate.jl"))   # M8_hindcast.jl も連鎖 include 済み
 
@@ -37,6 +39,43 @@ const M9_ORIGINS = Dict(
 )
 
 const M9_HORIZON = 1.0    # 1年先予報(#0052)
+
+"""
+theta_sig 拡大の適用しきい値(#0052/#0054 のデータ規則): **初回オリジン
+時点の較正窓のフィルタ後週次カウント合計 ΣN ≥ 50 なら theta_sig を拡大集合に
+含める**。#0049 の国条件(JPN 除外・THA 適用)をデータ規則として置き換えた
+もの(実測: JPN ΣN=0 → 除外、THA ΣN=618 → 適用で帰結を再現)。初回オリジン
+で判定し、以後のオリジンでは付け外ししない(#0052)。
+"""
+const THETA_SIG_COUNT_MIN = 50
+
+"""
+NegBin カウント予測 log 尤度(#0054 基準3): Σ_w log NegBin(N_w | ν·Λ̄_w, r)。
+count_loglik(M8_hindcast.jl)の NegBin 版(完全 log pmf)。r = Inf は
+ポアソン pmf(カウント窓のない国のフォールバック)。予報ラン・自由ランの
+両方に同一の (ν, r) を適用する(公平な比較のための同一スコアリング規則)。
+"""
+function count_loglik_negbin(ts, X, obs_counts, params, nu, r, cfg, window)
+    w = cfg.event_window
+    wsteps = max(1, round(Int, w / cfg.dt))
+    N = size(X, 3)
+    ll = 0.0; nwin = 0
+    for (k, c) in enumerate(obs_counts)
+        c >= 0 || continue
+        lo = cfg.t0 + (k - 1) * w
+        window[1] <= lo < window[2] || continue
+        lam = 0.0
+        i0 = (k - 1) * wsteps + 1
+        for i in i0:min(i0 + wsteps - 1, length(ts))
+            lam += mean(intensity(view(X, 1:N_STATE, i, j), params)
+                        for j in 1:N) * cfg.dt
+        end
+        mu = max(nu * lam, 1e-10)
+        ll += isfinite(r) ? negbin_logpmf(c, mu, r) : poisson_logpmf(c, mu)
+        nwin += 1
+    end
+    return ll, nwin
+end
 
 """
     forecast_ensemble(params, aug, res; horizon, seed, dt) -> (; t, X)
@@ -72,14 +111,23 @@ function forecast_ensemble(params, aug::Vector{AugmentedParam}, res;
 end
 
 """
-    run_origin(country, t_k, prior_center; N, seed, J, iters, N_eki) -> NamedTuple
+    run_origin(country, t_k, prior_center; N, seed, J, iters, N_eki,
+               include_theta_sig) -> NamedTuple
 
 1オリジン分の (較正 → 同化 → 予報 → 自由ラン → 評価)。戻り値に次オリジンへ
 の warm-start 用 `theta_center`(Dict)と評価指標一式を含む。
+
+カウント尤度は NegBin(#0054): EKI 較正後、まず現行ポアソン + 1/ν
+テンパリングの予備同化ランを実行し、その週次 Λ̄_w と観測 N_w
+(窓開始〜t_k のみ)から (ν*, r̂) をプロファイル(profile_count_dispersion、
+M9_negbin_eval.jl と同じ手続き)。その (ν*, r̂) で本同化ラン
+(count_model = :negbin)を実行する。カウント窓が1つも無い場合
+(JPN の t_k ≤ 28 等)は予備ランが本ランを兼ね、r = Inf(実質ポアソン)。
 """
 function run_origin(country::String, t_k::Real,
                     prior_center::Union{Nothing,Dict};
-                    N::Int, seed::Integer, J::Int, iters::Int, N_eki::Int)
+                    N::Int, seed::Integer, J::Int, iters::Int, N_eki::Int,
+                    include_theta_sig::Bool)
     ccfg = COUNTRY_CFG[country]
     win_start = ccfg.calib[1]
     window = (win_start, Float64(t_k))
@@ -88,13 +136,15 @@ function run_origin(country::String, t_k::Real,
 
     println("-- $country origin t=$(t_k) (calib window $window, eval $eval_win) --")
 
-    # (a) EKI 再較正(expanding window, warm-start, prior sd 復元)
+    # (a) EKI 再較正(expanding window, warm-start, prior sd 復元)。
+    # ミスフィット定義は M8 手続きのまま(#0054: EKI 内部は変更しない)
     calib = calibrate(country; J, iters, N = N_eki, seed = seed + 101,
-                      window, prior_center, prior_sd = 0.5, save = false)
-    theta_hat, nu_star = calib.theta_hat, calib.nu_star
+                      window, prior_center, prior_sd = 0.5, save = false,
+                      include_theta_sig)
+    theta_hat, nu_eki = calib.theta_hat, calib.nu_star
     theta_center = Dict(CAL_PARAMS[k].name => theta_hat[k] for k in eachindex(CAL_PARAMS))
     kw = theta_center
-    println("  較正値 θ̂ = ", round.(theta_hat, digits = 3), "  ν* = ", round(nu_star, digits = 2))
+    println("  較正値 θ̂ = ", round.(theta_hat, digits = 3), "  ν(EKI) = ", round(nu_eki, digits = 2))
 
     # 評価区間終端までの観測(較正・同化には window[2]=t_k 以前のみ使用)
     params0 = build_params(ccfg.regime)
@@ -111,14 +161,33 @@ function run_origin(country::String, t_k::Real,
                       rtps_alpha = 0.85,
                       obs_spread_floor_frac = 0.5)
     E0_state = initial_ensemble(country, params, recs_all; N, seed = seed + 1)
-    aug = build_m8_augmented_params(params, country)
+    aug = build_m8_augmented_params(params, country; include_theta_sig)
     E0 = augment_ensemble(E0_state, aug; rng = Xoshiro(seed + 6))
     obs_counts = build_obs_counts(country, cfg)
     event_times = filter(t -> t < cfg.t1,
                          build_forced_jumps(country; calib_window = window))
+    # 予備ラン(現行ポアソン + 1/ν): (ν*, r̂) プロファイルの Λ̄_w 供給源
     res = run_assimilation(params, E0, recs_calib, event_times;
-                           cfg, seed, obs_counts, count_scale = nu_star,
-                           count_temper = 1 / nu_star, augmented_params = aug)
+                           cfg, seed, obs_counts, count_scale = nu_eki,
+                           count_temper = 1 / nu_eki, augmented_params = aug)
+    ks = count_windows_in(obs_counts, cfg, window)
+    if isempty(ks)
+        # カウント窓なし(JPN t_k ≤ 28 等): 予備ランが本ランを兼ねる
+        nu_star, r_hat = nu_eki, Inf
+        println("  カウント窓なし — (ν*, r̂) プロファイルをスキップ(実質ポアソン)")
+    else
+        lams = window_lambdas(res.t, res.X, params, cfg, ks)
+        prof = profile_count_dispersion([obs_counts[k] for k in ks], lams)
+        nu_star, r_hat = prof.nu_star, prof.r_hat
+        println("  プロファイル ν* = ", round(nu_star, digits = 3),
+                "  r̂ = ", round(r_hat, digits = 4),
+                "(カウント窓 ", length(ks), ")")
+        # 本同化ラン: NegBin 尤度(#0054。テンパリングなし、同一シード)
+        res = run_assimilation(params, E0, recs_calib, event_times;
+                               cfg, seed, obs_counts, count_scale = nu_star,
+                               count_model = :negbin, count_dispersion = r_hat,
+                               augmented_params = aug)
+    end
 
     # (c) 1年先予報アンサンブル(拡大事後値の持ち込み + RW 継続、#0053)
     fe = forecast_ensemble(params, aug, res; horizon = t_fore_end - t_k,
@@ -143,13 +212,15 @@ function run_origin(country::String, t_k::Real,
     # count_loglik の窓インデックスは各系列自身の t0(fe: t_k、free: 0)基準
     # なので、obs_counts も系列ごとに別グリッドで構築する(同一カレンダー
     # 窓だが index 対応が異なる — 取り違えると窓ずれで logL が壊れる)。
+    # 基準3 のスコアリングは NegBin の素の pmf(#0054)。当該オリジンの
+    # (ν*, r̂) を予報ラン・自由ランの両方に共通適用(同一スコアリング規則)
     cfg_fore_eval = AssimConfig(t0 = t_k, t1 = t_fore_end)
     obs_counts_fore = build_obs_counts(country, cfg_fore_eval)
-    ll_fore, nwin_fore = count_loglik(fe.t, fe.X, obs_counts_fore, params, nu_star,
-                                      cfg_fore_eval, eval_win)
+    ll_fore, nwin_fore = count_loglik_negbin(fe.t, fe.X, obs_counts_fore, params,
+                                             nu_star, r_hat, cfg_fore_eval, eval_win)
     obs_counts_free = build_obs_counts(country, cfg_free)
-    ll_free, _ = count_loglik(ts_free, Xf, obs_counts_free, params, nu_star,
-                              cfg_free, eval_win)
+    ll_free, _ = count_loglik_negbin(ts_free, Xf, obs_counts_free, params,
+                                     nu_star, r_hat, cfg_free, eval_win)
 
     println("  被覆(予報) = ", round(cov_f, digits = 3), " (n=$n_f)  ",
             "被覆(自由) = ", round(cov_r, digits = 3), " (n=$n_r)")
@@ -165,7 +236,7 @@ function run_origin(country::String, t_k::Real,
                 "  自由 ", round(ll_free, digits = 2))
     end
 
-    return (; t_k = Float64(t_k), theta_center, nu_star,
+    return (; t_k = Float64(t_k), theta_center, nu_star, r_hat,
             cov_fore = (hit = hit_f, n = n_f), cov_free = (hit = hit_r, n = n_r),
             err_fore, err_free, ll_fore, ll_free, nwin = nwin_fore,
             resample = res.nresample, ess = extrema(res.ess))
@@ -188,6 +259,19 @@ function run_walkforward(country::String; N::Int = 100, seed::Integer = 20260711
     end
     println("== $country M9 walk-forward: origins = $orig_list (N=$N, J=$J, iters=$iters) ==")
 
+    # theta_sig 拡大の適用規則(#0052/#0054 のデータ規則): 初回オリジン時点の
+    # 較正窓のフィルタ後週次カウント合計 ΣN ≥ THETA_SIG_COUNT_MIN で適用。
+    # 初回オリジンで判定し全オリジンに固定(結果を見て付け外ししない)。
+    win_start = COUNTRY_CFG[country].calib[1]
+    t_k1 = Float64(first(orig_list))
+    cfg0 = AssimConfig(t0 = 0.0, t1 = t_k1)
+    total_counts = windowed_count_total(build_obs_counts(country, cfg0),
+                                        cfg0.t0, cfg0.event_window, (win_start, t_k1))
+    include_theta_sig = total_counts >= THETA_SIG_COUNT_MIN
+    println("  theta_sig 規則: 較正窓 [$win_start, $t_k1) のフィルタ後 ΣN = ",
+            total_counts, " (しきい値 $THETA_SIG_COUNT_MIN) → ",
+            include_theta_sig ? "拡大集合に含める" : "除外")
+
     # 初回オリジンの prior 中心 = M8 凍結値(#0050)で warm-start(#0052)。
     # 凍結値が無い場合(未凍結国)は nothing(EKI 既定のモーメント初期化)。
     frozen = load_calibrated(country)
@@ -198,7 +282,8 @@ function run_walkforward(country::String; N::Int = 100, seed::Integer = 20260711
     origin_results = []
     t_start = time()
     for t_k in orig_list
-        r = run_origin(country, t_k, prior_center; N, seed = seed + t_k, J, iters, N_eki)
+        r = run_origin(country, t_k, prior_center; N, seed = seed + t_k, J, iters,
+                       N_eki, include_theta_sig)
         push!(origin_results, r)
         prior_center = r.theta_center    # 次オリジンへ warm-start(#0052)
     end
@@ -271,6 +356,7 @@ function run_walkforward(country::String; N::Int = 100, seed::Integer = 20260711
             "t_k" => r.t_k,
             "theta" => Dict(string(k) => v for (k, v) in r.theta_center),
             "nu_star" => r.nu_star,
+            "r_hat" => r.r_hat,
             "coverage_forecast" => Dict("hit" => r.cov_fore.hit, "n" => r.cov_fore.n),
             "coverage_free" => Dict("hit" => r.cov_free.hit, "n" => r.cov_free.n),
             "ll_forecast" => r.ll_fore, "ll_free" => r.ll_free, "nwin" => r.nwin,

@@ -77,6 +77,45 @@ function negbin_profile_r(counts::AbstractVector{<:Integer},
 end
 
 """
+    profile_count_dispersion(counts, lambdas) -> (; nu_star, r_hat)
+
+カウント観測モデルの (ν, r) プロファイル(#0031-1/#0054): 窓別カウント
+`counts` とモデル強度積分 `lambdas`(同一窓、ν 適用前)から、
+ν* = ΣN / ΣΛ(ポアソン最尤、下限 1.0 — #0031-1)を先に解き、
+平均 ν*·Λ_w を固定して r̂ を `negbin_profile_r` で1次元最尤する。
+M9 walk-forward のオリジン別プロファイル(窓開始〜t_k のデータのみ)用。
+"""
+function profile_count_dispersion(counts::AbstractVector{<:Integer},
+                                  lambdas::AbstractVector{<:Real})
+    length(counts) == length(lambdas) ||
+        throw(DimensionMismatch("counts and lambdas must have equal length"))
+    isempty(counts) && throw(ArgumentError("no count windows to profile"))
+    nu_star = max(sum(counts) / max(sum(lambdas), 1e-8), 1.0)
+    r_hat = negbin_profile_r(counts, nu_star .* lambdas)
+    return (; nu_star, r_hat)
+end
+
+"""
+    windowed_count_total(obs_counts, t0, event_window, window) -> Int
+
+週次カウント列 `obs_counts`(窓 k は [t0+(k−1)·event_window, t0+k·event_window)、
+負値 = データなし #0031-3)のうち、窓開始が `window = (lo, hi)` に入る
+データあり窓のカウント合計。theta_sig 拡大の適用規則(#0052/#0054:
+較正窓のフィルタ後週次カウント合計によるデータ規則)などの情報量判定に使う。
+"""
+function windowed_count_total(obs_counts::AbstractVector{<:Integer}, t0::Real,
+                              event_window::Real, window)
+    tot = 0
+    for (k, c) in enumerate(obs_counts)
+        c >= 0 || continue
+        lo = t0 + (k - 1) * event_window
+        window[1] <= lo < window[2] || continue
+        tot += c
+    end
+    return tot
+end
+
+"""
     normalize_weights(logw) -> Vector{Float64}
 
 log-sum-exp で正規化した重み(Σ w = 1)。

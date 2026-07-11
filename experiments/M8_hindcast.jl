@@ -60,16 +60,19 @@ M8 の拡大パラメータ記述子(DECISIONS #0046/#0049)を `params`(fit_exog
 L3 既定値)を除き較正済み中心(mu_gbar/c_v0 は EKI 較正値、netgrowth は
 fit_exogenous 値、a_T/r_phi は較正対象外なので §8.2 のレジーム既定値)を使う。
 
-**国条件付き除外(#0049-2)**: `country == "JPN"` では theta_sig を拡大集合
-から除外する(イベント情報のほぼ無い国で RW が無拘束に漂流し λ を過大化する
-副作用 — #0048-3)。THA は #0046 どおり theta_sig を含める。除外時、theta_sig
-は augmented_params に現れないため member_params が触れず、較正済み定数と
-しての従来(非拡大)動作に自動的に戻る。
+**theta_sig の適用可否**: 既定は国条件(#0049-2、`country == "JPN"` で除外 —
+イベント情報のほぼ無い国で RW が無拘束に漂流し λ を過大化する副作用
+#0048-3。M8 の再現動作)。M9(#0052/#0054)は `include_theta_sig` キーワードに
+データ規則(初回オリジン較正窓のフィルタ後週次カウント合計 ΣN のしきい値
+判定)の結果を明示的に渡す。除外時、theta_sig は augmented_params に現れない
+ため member_params が触れず、較正済み定数としての従来(非拡大)動作に
+自動的に戻る。
 """
-function build_m8_augmented_params(params::ModelParameters, country::AbstractString)
+function build_m8_augmented_params(params::ModelParameters, country::AbstractString;
+                                   include_theta_sig::Bool = country != "JPN")
     s = M8_AUG_SETTINGS
     aug = AugmentedParam[]
-    if country != "JPN"
+    if include_theta_sig
         push!(aug, AugmentedParam(name = :theta_sig, link = s.theta_sig.link,
                        init = params.l3.theta_sig,
                        init_sd = s.theta_sig.init_sd, rw_sd = s.theta_sig.rw_sd))
@@ -276,6 +279,35 @@ function count_loglik(ts, X, obs_counts, params, nu, cfg, window)
         nwin += 1
     end
     return ll, nwin
+end
+
+"""
+窓開始が `window = (lo, hi)` に入るデータあり週次窓のインデックス列
+(#0054。カウント指標の窓選別を M9_negbin_eval / M9_walkforward で共用)。
+"""
+count_windows_in(obs_counts, cfg::AssimConfig, window) =
+    [k for (k, c) in enumerate(obs_counts)
+     if c >= 0 && window[1] <= cfg.t0 + (k - 1) * cfg.event_window < window[2]]
+
+"""
+週次窓 `ks` ごとのアンサンブル平均強度の窓積分 Λ̄_w(count_loglik と同一
+定義。#0054 の (ν*, r̂) プロファイル入力)。`ts`/`X` は同化ランの時刻列と
+状態配列(拡大行があってもよい — 先頭 N_STATE 行のみ参照)。
+"""
+function window_lambdas(ts, X, params, cfg::AssimConfig, ks)
+    wsteps = max(1, round(Int, cfg.event_window / cfg.dt))
+    N = size(X, 3)
+    lams = Vector{Float64}(undef, length(ks))
+    for (j, k) in enumerate(ks)
+        acc = 0.0
+        i0 = (k - 1) * wsteps + 1
+        for i in i0:min(i0 + wsteps - 1, length(ts))
+            acc += mean(intensity(view(X, 1:N_STATE, i, m), params)
+                        for m in 1:N) * cfg.dt
+        end
+        lams[j] = acc
+    end
+    return lams
 end
 
 """

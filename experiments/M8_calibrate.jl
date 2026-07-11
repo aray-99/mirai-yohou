@@ -48,8 +48,11 @@ end
 `window` 省略時は国既定の較正窓(#0030-4、M8 の従来動作)。M9(#0052)の
 expanding walk-forward では `(窓開始, オリジン t_k)` を明示的に渡し、
 オリジン以前のデータのみで較正する(検証区間は較正・同化とも未参照)。
+`include_theta_sig` は theta_sig 拡大の適用可否(既定 = M8 の国条件 #0049-2。
+M9 はデータ規則 #0054 の判定結果を渡す)。
 """
-function calib_inputs(country; N, seed, window = COUNTRY_CFG[country].calib)
+function calib_inputs(country; N, seed, window = COUNTRY_CFG[country].calib,
+                      include_theta_sig::Bool = country != "JPN")
     ccfg = COUNTRY_CFG[country]
     params0 = build_params(ccfg.regime)
     recs = build_observations(country, params0; t1 = window[2])
@@ -65,7 +68,8 @@ function calib_inputs(country; N, seed, window = COUNTRY_CFG[country].calib)
     event_times = filter(t -> t < cfg.t1,
                          build_forced_jumps(country; calib_window = window))
     nu0 = init_nu(obs_counts, cfg, params0, window)
-    return (; country, ccfg, window, recs, cfg, E0, obs_counts, event_times, nu0)
+    return (; country, ccfg, window, recs, cfg, E0, obs_counts, event_times, nu0,
+            include_theta_sig)
 end
 
 """
@@ -86,7 +90,8 @@ function forward_G(inp, theta; N, seed)
     # (M8_AUG_SETTINGS)を使い、較正と検証の力学を一致させる。初期アンサンブル
     # の乱数は θ_j 間で共通(seed のみに依存)にして CRN 性を保つ(呼び出し側
     # は j に依らず同一の seed = seed_it を渡す設計、上記コメント参照)。
-    aug = build_m8_augmented_params(params, inp.country)
+    aug = build_m8_augmented_params(params, inp.country;
+                                    include_theta_sig = inp.include_theta_sig)
     E0 = augment_ensemble(inp.E0, aug; rng = Xoshiro(seed))
     res = try
         run_assimilation(params, E0, recs, inp.event_times;
@@ -177,7 +182,8 @@ function calibrate(country::String; J::Int = 16, iters::Int = 3, N::Int = 50,
                    window = COUNTRY_CFG[country].calib,
                    prior_center::Union{Nothing,Dict} = nothing,
                    prior_sd::Float64 = 0.5,
-                   save::Bool = true)
+                   save::Bool = true,
+                   include_theta_sig::Bool = country != "JPN")
     ccfg = COUNTRY_CFG[country]
     rng = Xoshiro(seed)
     params0 = build_params(ccfg.regime)
@@ -194,7 +200,7 @@ function calibrate(country::String; J::Int = 16, iters::Int = 3, N::Int = 50,
     H = eta0 .+ prior_sd .* randn(rng, length(eta0), J)
     println("== $country EKI 較正: J=$J iters=$iters N=$N window=$window ==")
     println("  初期中心 θ = ", round.(theta0, digits = 3))
-    inp = calib_inputs(country; N, seed, window)
+    inp = calib_inputs(country; N, seed, window, include_theta_sig)
     nu_star = inp.nu0
     for it in 1:iters
         Gcols = Vector{Any}(undef, J)

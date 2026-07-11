@@ -62,6 +62,7 @@ export poisson_logweights, normalize_weights, ess, systematic_resample,
 
 # assimilation driver (§9.2/§9.3/§13)
 export AssimConfig, AssimResult, run_assimilation, free_ensemble, with_theta_sig
+export AugmentedParam, augment_ensemble, build_member_params
 
 # Phase B (§10)
 export simulate_sde_phaseb, drift_jacobian_sparsity

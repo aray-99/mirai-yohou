@@ -7,6 +7,9 @@
 #   Λ_i = ∫ lam_i dt をトラッキングし、ポアソン重み+ESS<N/2 で系統再抽選。
 # - 乗法的インフレーション 1.02 常時、強制ジャンプ直後の解析は 1.05(§9.3)。
 # - E1b: theta_sig を log 座標で状態拡大(行 14。d(param)=0+微小ノイズ、§8.3)。
+# - 駆動パラメータの L3 状態拡大の汎用化(DECISIONS #0046): augmented_params
+#   (AugmentedParam のリスト)で任意個数・任意名のパラメータを状態拡大できる。
+#   augmented=true(theta_sig 1個)は内部でこの記述子1個に変換される特例経路。
 
 """
 同化の設定(既定値は SPEC §9/§13)。
@@ -41,9 +44,28 @@ Base.@kwdef struct AssimConfig
     # 平滑化で更新する状態行(変数局所化、#0025)。実情報のない変数
     # (k 等)への雑音蓄積を防ぐ。既定は制度ブロック + 格差。
     smoother_vars::Vector{Int} = [IX_G, IX_TAU, IX_TAUA, IX_SIG, IX_PP]
+    # tauA(IX_TAUA)への緩い擬似観測の倍率(DECISIONS #0036)。tau 観測と
+    # 同時刻・同値の擬似観測を sd = このスカラー × tau 観測 sd で追加する。
+    # 既定 0.0 = オフ(従来動作。E1・既存テストの記録結果を保護)。
+    tauA_pseudo_sd_mult::Float64 = 0.0
+    # 現在時刻解析の変数局所化(DECISIONS #0040-(α))。ここに列挙した状態行は、
+    # 解析バッチが analysis_unmask_names のいずれの観測名も含まない場合、
+    # 現在時刻の EnKF 更新(K の該当行)をマスクする。EnKS の smoother_vars/
+    # smooth_rows(過去平滑化の局所化、#0025)と対になる現在時刻側の局所化。
+    # 既定は空 = 従来動作(後方互換)。
+    analysis_masked_vars::Vector{Int} = Int[]
+    # analysis_masked_vars のマスクを解除する観測名(#0040-(α))。解析バッチに
+    # この name の観測が1つでも含まれればマスクを解除する。
+    analysis_unmask_names::Vector{Symbol} = Symbol[]
+    # 観測座標の加法的スプレッド下限(DECISIONS #0043)。解析直前の事前
+    # アンサンブルで、観測座標(target_ix ≠ 0 の恒等写像観測に限る)の sd が
+    # floor = このスカラー × 観測 sd を下回る場合、対応する状態行へ独立
+    # ガウス摂動を加えて sd を floor まで回復してから解析する。既定 0.0 =
+    # オフ(後方互換)。ゲイン消失(#0042-1)への対処。
+    obs_spread_floor_frac::Float64 = 0.0
 end
 
-"同化ランの結果(X は状態行 × 時刻 × メンバー。拡大時は最終行がパラメータ)"
+"同化ランの結果(X は状態行 × 時刻 × メンバー。拡大時は N_STATE+1 行目以降が拡大パラメータ、#0046)"
 struct AssimResult
     t::Vector{Float64}
     X::Array{Float64,3}
@@ -69,27 +91,237 @@ function pathological(xi::AbstractVector{Float64})
     return xi[IX_SIG] > 3
 end
 
-"theta_sig を差し替えた ModelParameters(状態拡大メンバー用)"
+"""
+    select_masked_rows(cfg, batch) -> Vector{Int}
+
+現在時刻解析の変数局所化(DECISIONS #0040-(α))の対象行を選ぶ。
+`cfg.analysis_masked_vars` が空なら常に `Int[]`(既定・従来動作)。
+非空でも、`batch` に `cfg.analysis_unmask_names` のいずれかの観測名が
+1つでも含まれればマスク解除(`Int[]`)。それ以外は `cfg.analysis_masked_vars`
+をそのまま返す。
+"""
+function select_masked_rows(cfg::AssimConfig, batch::AbstractVector{ObservationRecord})
+    isempty(cfg.analysis_masked_vars) && return Int[]
+    any(o.spec.name in cfg.analysis_unmask_names for o in batch) && return Int[]
+    return cfg.analysis_masked_vars
+end
+
+"""
+    apply_obs_spread_floor!(E, batch, floor_frac, rng) -> E
+
+観測座標の加法的スプレッド床(DECISIONS #0043)。`floor_frac <= 0` は
+no-op(既定・後方互換)。`batch` 内の各観測について、`target_ix == 0`
+(合成観測、恒等写像でない h)は対象外。恒等写像観測(`target_ix != 0`)は
+事前アンサンブル `E` での観測座標の sd を評価し、`floor = floor_frac *
+o.spec.sd` を下回れば、対応する状態行(`E` の 1:N_STATE 内、augmented でも
+theta_sig 行には触れない)へ独立ガウス摂動 N(0, floor² − sd²) を全メンバー
+独立に加える。同一バッチで複数観測が同じ状態行を対象にする場合は、
+必要な追加分散が最大の1回のみ適用する(二重加算を避ける)。
+`rng` は呼び出し側(run_assimilation の既存ストリーム)から渡す。
+"""
+function apply_obs_spread_floor!(E::AbstractMatrix{Float64},
+                                 batch::AbstractVector{ObservationRecord},
+                                 floor_frac::Float64, rng::AbstractRNG)
+    floor_frac > 0 || return E
+    N = size(E, 2)
+    extra_var = Dict{Int,Float64}()   # 状態行 → 追加分散(バッチ内最大)
+    for o in batch
+        ix = o.spec.target_ix
+        ix == 0 && continue
+        z = [o.spec.h(view(E, 1:N_STATE, j)) for j in 1:N]
+        zbar = sum(z) / N
+        sd = sqrt(sum(abs2, z .- zbar) / (N - 1))
+        floor = floor_frac * o.spec.sd
+        sd < floor || continue
+        v = floor^2 - sd^2
+        extra_var[ix] = max(get(extra_var, ix, 0.0), v)
+    end
+    for (ix, v) in extra_var
+        sdadd = sqrt(v)
+        for j in 1:N
+            E[ix, j] += sdadd * randn(rng)
+        end
+    end
+    return E
+end
+
+"theta_sig を差し替えた ModelParameters(状態拡大メンバー用。後方互換の特例経路)"
 with_theta_sig(p::ModelParameters, theta::Real) =
     ModelParameters(p.regime, p.l1, p.l2, L3Params(theta_sig = float(theta)),
                     p.exo, p.x0_nat, p.x0)
 
 """
-    run_assimilation(params, E0, obs, event_times; cfg, seed,
-                     augmented=false) -> AssimResult
+駆動パラメータの L3 状態拡大の記述子(DECISIONS #0046)。
 
-初期アンサンブル `E0`(n × N。augmented なら n = 14 で最終行 = log theta_sig)
-から §9 のハイブリッド同化(EnKF + ポアソン重み + イベント同期)を実行する。
-週次イベントカウントは `event_times`(真値カタログ)を窓に集計して用いる。
+`augmented::Bool` + `param_noise_sd`(theta_sig 専用のハードコード、#0010系)を
+一般化し、状態拡大するパラメータの集合を記述子のリストとして表現する。
+
+- `name`: L2Params / L3Params / ConstantExogenous のいずれかのフィールド名
+  (`_aug_location` が名前だけで所属構造体を判定する)。
+- `link`: `:log`(状態行 = log(自然値)。正値パラメータ用)または
+  `:identity`(状態行 = 自然値。負値も可)。
+- `init`: 初期値(自然単位)。初期アンサンブル構築(`augment_ensemble`)にのみ使う。
+- `init_sd`: 初期アンサンブルスプレッド(リンク座標)。
+- `rw_sd`: 予測ステップのランダムウォーク sd(リンク座標、/√年)。
+"""
+Base.@kwdef struct AugmentedParam
+    name::Symbol
+    link::Symbol = :identity
+    init::Float64 = 0.0
+    init_sd::Float64 = 0.0
+    rw_sd::Float64 = 0.0
+end
+
+"リンク座標 → 自然単位(#0046)。未知の link はエラー"
+function _link_from(link::Symbol, x::Real)
+    link === :log && return exp(x)
+    link === :identity && return x
+    throw(ArgumentError("unknown AugmentedParam link :$link (expected :log or :identity)"))
+end
+
+"自然単位 → リンク座標(#0046)。未知の link はエラー"
+function _link_to(link::Symbol, x::Real)
+    link === :log && return log(x)
+    link === :identity && return x
+    throw(ArgumentError("unknown AugmentedParam link :$link (expected :log or :identity)"))
+end
+
+"""
+    _aug_location(name) -> Symbol
+
+拡大パラメータ名がどの構造体に属するか(:l2 / :l3 / :exo)を、フィールド名
+だけから判定する(DECISIONS #0046)。L3Params → ConstantExogenous → L2Params
+の順で探し、いずれにも無ければエラー(現行モデルは名前衝突なし)。
+"""
+function _aug_location(name::Symbol)
+    name in fieldnames(L3Params) && return :l3
+    name in fieldnames(ConstantExogenous) && return :exo
+    name in fieldnames(L2Params) && return :l2
+    throw(ArgumentError("augmented param :$name not found in L2Params/L3Params/ConstantExogenous"))
+end
+
+"""
+    _with_field(x::T, field, value) -> T
+
+kwdef struct `x` のフィールド `field` だけを `value` に差し替えたコピー
+(他フィールドはそのままコピー)。Setfield 等の新規依存を避けるための
+手書きヘルパ(DECISIONS #0046)。
+"""
+function _with_field(x::T, field::Symbol, value) where {T}
+    vals = Dict{Symbol,Any}(f => getfield(x, f) for f in fieldnames(T))
+    haskey(vals, field) || throw(ArgumentError("$T has no field :$field"))
+    vals[field] = value
+    return T(; vals...)
+end
+
+"""
+    _inject_param(p::ModelParameters, name, value) -> ModelParameters
+
+拡大パラメータ1個(自然単位の値)を注入した `ModelParameters` を返す
+(所属構造体は `_aug_location` で判定)。
+"""
+function _inject_param(p::ModelParameters, name::Symbol, value::Float64)
+    loc = _aug_location(name)
+    if loc === :l3
+        return ModelParameters(p.regime, p.l1, p.l2, _with_field(p.l3, name, value),
+                               p.exo, p.x0_nat, p.x0)
+    elseif loc === :exo
+        return ModelParameters(p.regime, p.l1, p.l2, p.l3, _with_field(p.exo, name, value),
+                               p.x0_nat, p.x0)
+    else
+        return ModelParameters(p.regime, p.l1, _with_field(p.l2, name, value), p.l3, p.exo,
+                               p.x0_nat, p.x0)
+    end
+end
+
+"""
+    build_member_params(params, augmented_params, E, state_rows, i) -> ModelParameters
+
+拡大行(`E` の `state_rows+1:state_rows+length(augmented_params)`、メンバー `i`)
+をそれぞれのリンク座標から自然単位に逆変換して `params` に順次注入する
+(DECISIONS #0046)。`augmented_params` が空なら `params` をそのまま返す。
+"""
+function build_member_params(params::ModelParameters,
+                             augmented_params::Vector{AugmentedParam},
+                             E::AbstractMatrix{Float64}, state_rows::Int, i::Int)
+    p = params
+    for (k, ap) in enumerate(augmented_params)
+        value = _link_from(ap.link, E[state_rows + k, i])
+        p = _inject_param(p, ap.name, value)
+    end
+    return p
+end
+
+"""
+    augment_ensemble(E0_state, augmented_params; rng) -> Matrix
+
+状態行列 `E0_state`(N_STATE × N)に `augmented_params` の初期アンサンブル行
+(記述子順)を追加した拡大初期アンサンブル(n × N、n = N_STATE +
+length(augmented_params))を返す(DECISIONS #0046)。行 k は
+`_link_to(link, init) + init_sd * randn()`(メンバー独立)。
+`augmented_params` が空なら `E0_state` のコピーをそのまま返す(後方互換)。
+"""
+function augment_ensemble(E0_state::AbstractMatrix{Float64},
+                         augmented_params::Vector{AugmentedParam};
+                         rng::AbstractRNG)
+    isempty(augmented_params) && return Matrix{Float64}(E0_state)
+    N = size(E0_state, 2)
+    extra = Matrix{Float64}(undef, length(augmented_params), N)
+    for (k, ap) in enumerate(augmented_params)
+        c = _link_to(ap.link, ap.init)
+        extra[k, :] .= c .+ ap.init_sd .* randn(rng, N)
+    end
+    return vcat(Matrix{Float64}(E0_state), extra)
+end
+
+"""
+    run_assimilation(params, E0, obs, event_times; cfg, seed,
+                     augmented=false, augmented_params=AugmentedParam[],
+                     obs_counts=nothing, count_scale=1.0)
+        -> AssimResult
+
+初期アンサンブル `E0`(n × N。n = N_STATE + 拡大パラメータ数)から §9 の
+ハイブリッド同化(EnKF + ポアソン重み + イベント同期)を実行する。
+
+駆動パラメータの L3 状態拡大(DECISIONS #0046): `augmented_params` に
+`AugmentedParam` のリストを渡すと、その記述子順に状態行(N_STATE+1 以降)を
+解釈し、各ステップでリンク座標のランダムウォークを加え、`ModelParameters`
+への注入は名前で L2Params/L3Params/ConstantExogenous に振り分ける。
+`augmented::Bool`(既定 false)は theta_sig 1個のみを状態拡大する従来経路
+(#0010 系)で、内部的には `AugmentedParam(:theta_sig, :log, ..., rw_sd =
+param_noise_sd)` 1個の記述子に変換して同じ機構で処理する(結果は従来と
+同一。E1/既存テストの記録結果を保護)。`augmented` と `augmented_params` の
+同時指定はエラー。
+
+週次イベントカウントの扱い(DECISIONS #0031):
+- 既定(`obs_counts = nothing`): E1 と同じく `event_times`(真値カタログ)を
+  窓に集計して観測カウントとする(モデルジャンプ = 観測イベントが1対1)。
+- 実データ(M8): `obs_counts` に窓別の観測カウント列(窓 k は区間
+  [t0+(k−1)·event_window, t0+k·event_window))を渡す。**負値はデータなし**を
+  意味し、その窓のポアソン重み更新をスキップする(#0031-3)。
+  `count_scale` は報告率 ν(N_w 〜 Poisson(ν·Λ)、#0031-1)。`count_temper` は
+  過分散カウントの尤度テンパリング係数(1/ν 推奨、#0033。既定 1 = 素のポアソン)。
 """
 function run_assimilation(params::ModelParameters, E0::Matrix{Float64},
                           obs::Vector{ObservationRecord},
                           event_times::Vector{Float64};
                           cfg::AssimConfig = AssimConfig(), seed::Integer,
-                          augmented::Bool = false)
+                          augmented::Bool = false,
+                          augmented_params::Vector{AugmentedParam} = AugmentedParam[],
+                          obs_counts::Union{Nothing, Vector{Int}} = nothing,
+                          count_scale::Float64 = 1.0,
+                          count_temper::Float64 = 1.0)
+    augmented && !isempty(augmented_params) &&
+        throw(ArgumentError("augmented=true と augmented_params の同時指定はできません"))
+    # 後方互換(#0010系): augmented=true は theta_sig 1個の記述子に変換する
+    aug_params = augmented ?
+        [AugmentedParam(name = :theta_sig, link = :log, rw_sd = cfg.param_noise_sd)] :
+        augmented_params
+
     n, N = size(E0)
-    n == (augmented ? N_STATE + 1 : N_STATE) ||
-        throw(DimensionMismatch("E0 has $n rows, augmented=$augmented"))
+    n == N_STATE + length(aug_params) ||
+        throw(DimensionMismatch("E0 has $n rows, expected $(N_STATE + length(aug_params)) " *
+                                "(N_STATE=$N_STATE + $(length(aug_params)) augmented params)"))
 
     nsteps = round(Int, (cfg.t1 - cfg.t0) / cfg.dt)
     ts = collect(range(cfg.t0; step = cfg.dt, length = nsteps + 1))
@@ -126,7 +358,8 @@ function run_assimilation(params::ModelParameters, E0::Matrix{Float64},
     ranks = Dict{Symbol,Vector{Int}}()
     sqdt = sqrt(cfg.dt)
 
-    member_params(i) = augmented ? with_theta_sig(params, exp(E[end, i])) : params
+    member_params(i) = isempty(aug_params) ? params :
+        build_member_params(params, aug_params, E, N_STATE, i)
 
     # 固定ラグ EnKS(#0024): smoother_dt 刻みでスナップショットを保持し、
     # 解析のたびに現在時刻から smoother_lag 以内のものを同時更新する。
@@ -162,17 +395,28 @@ function run_assimilation(params::ModelParameters, E0::Matrix{Float64},
             xi = @view E[1:N_STATE, i]
             Lambda[i] += intensity(xi, p_i) * cfg.dt
             drift!(f, xi, p_i, t)
+            guard_sigma_drift!(f)                    # σ_s ガード(#0032)
             diffusion!(sig, xi, p_i, t)
             randn!(rngs[i], dW)
             @. xi += cfg.dt * f + sqdt * sig * dW
-            if augmented   # d(param) = 0 + 微小ノイズ(§8.3)
-                E[end, i] += cfg.param_noise_sd * sqdt * randn(rngs[i])
+            guard_sigma_state!(xi)
+            for (k, ap) in enumerate(aug_params)   # d(param) = 0 + 微小ノイズ(§8.3/#0046)
+                E[N_STATE + k, i] += ap.rw_sd * sqdt * randn(rngs[i])
             end
         end
 
         # (c) 週次窓の終端: ポアソン重みを累積し、ESS < N/2 で系統再抽選(§9.3)
         if step % wsteps == 0
-            logw .+= poisson_logweights(window_count, Lambda)
+            # 観測カウント: 既定はカタログ集計(E1)、実データでは窓別列(#0031)。
+            # 負値 = データなし窓 → 重み更新スキップ(病的ガードは常時)。
+            widx = step ÷ wsteps
+            observed = obs_counts === nothing ? window_count :
+                       (widx <= length(obs_counts) ? obs_counts[widx] : -1)
+            if observed >= 0
+                # count_temper: 過分散カウントの情報量換算(#0033。既定1 = 素のポアソン)
+                logw .+= count_temper .*
+                         poisson_logweights(observed, count_scale .* Lambda)
+            end
             # 病的メンバーは重みゼロ化して強制再抽選(#0011)。ESS は単一
             # 外れ値では下がらないため、暴走メンバーが強制ジャンプ
             # (m ∝ sigma_s^-)で数値爆発する前に淘汰する必要がある。
@@ -205,6 +449,18 @@ function run_assimilation(params::ModelParameters, E0::Matrix{Float64},
         # (d) 解析ステップ(この時刻に届いた観測のみ、§9.2)
         if haskey(obs_at, step + 1)
             batch = obs_at[step + 1]
+            # tauA への緩い擬似観測(DECISIONS #0036、既定オフ)。batch を
+            # コピーして追加するため obs_at 由来の元配列は変更しない。
+            if cfg.tauA_pseudo_sd_mult > 0
+                batch = augment_tauA_pseudo(batch, cfg.tauA_pseudo_sd_mult)
+            end
+            # 観測座標の事前スプレッド床(DECISIONS #0043、既定オフ)。batch
+            # 確定後・yobs/R/hfun 組み立て前に E を直接摂動するため、以降の
+            # ランク計算・spread_prior(RTPS)・enks_analysis! は全て床適用後の
+            # 実効事前を見る(意図通り: #0043 は解析直前の実効事前の拡大)。
+            if cfg.obs_spread_floor_frac > 0
+                apply_obs_spread_floor!(E, batch, cfg.obs_spread_floor_frac, rngs[1])
+            end
             # ランク(解析直前の事前アンサンブルに対する観測の順位)。
             # 観測 = 真値 + ノイズ のため、メンバー側にも観測ノイズ抽選を
             # 加えるのがランクヒストグラムの標準定義(Hamill 2001、#0017)。
@@ -218,6 +474,9 @@ function run_assimilation(params::ModelParameters, E0::Matrix{Float64},
             yobs = [o.value for o in batch]
             R = Diagonal([o.spec.sd^2 for o in batch]) |> Matrix
             hfun = col -> [o.spec.h(view(col, 1:N_STATE)) for o in batch]
+
+            # 現在時刻解析の変数局所化(#0040-(α))
+            masked_rows = select_masked_rows(cfg, batch)
 
             # ラグ窓の前進(EnKS。窓外のスナップショットは確定)
             while smoothing && lag_start <= length(snap_ts) &&
@@ -236,7 +495,8 @@ function run_assimilation(params::ModelParameters, E0::Matrix{Float64},
                 spread_prior = ensemble_spread(E)
                 enks_analysis!(E, window_snaps, yobs, hfun, R;
                                rng = rngs[1], rho_inf = 1.0,
-                               smooth_rows = cfg.smoother_vars)
+                               smooth_rows = cfg.smoother_vars,
+                               masked_rows)
                 alpha = jump_since_analysis ? cfg.rtps_alpha_jump : cfg.rtps_alpha
                 rtps!(E, spread_prior; alpha)
             else
@@ -245,7 +505,8 @@ function run_assimilation(params::ModelParameters, E0::Matrix{Float64},
                     rho_base^((t_next - t_last_analysis) / cfg.tau_ref) : rho_base
                 enks_analysis!(E, window_snaps, yobs, hfun, R;
                                rng = rngs[1], rho_inf = rho,
-                               smooth_rows = cfg.smoother_vars)
+                               smooth_rows = cfg.smoother_vars,
+                               masked_rows)
             end
             postprocess_analysis!(E)
             jump_since_analysis = false

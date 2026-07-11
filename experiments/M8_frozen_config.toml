@@ -1,0 +1,51 @@
+[events]
+count_scale = 0.1
+min_size = 5.0
+q = 0.98
+count_temper = "1/nu"
+
+[meta]
+decisions = "#0034 / #0036 / #0037 / #0040 / #0041 / #0043 / #0044 / #0046 / #0047 / #0049 / #0050"
+note = "M8 6回目(最終)検証ラン前に凍結(#0049 c_v0 拡大 + JPN theta_sig 除外後の再較正値)。検証結果を見た後の変更は禁止(#0030-7)。rtps_alpha 0.85(#0040-(β))・obs_spread_floor_frac 0.5(#0043)はスクリプトの AssimConfig 構築で明示指定(この節・この注記は記録用)"
+frozen_at = "2026-07-11T11:00:00"
+
+[THA]
+nu = 4.21528500064342
+eta_g = 0.6922115935222579
+calib_commit = "e954395"
+mu_gbar = -0.930810084338426
+delta_sig = 0.021672984963371267
+mu_p = 0.11929949366182074
+calib_window = [20, 28]
+c_v0 = 5.300004113731522
+lam0 = 0.09744441490443231
+
+[run]
+N = 100
+rtps_alpha = 0.85
+seed = 20260708
+smoother_lag = 5.0
+t1 = 35.0
+spread0 = 0.3
+
+[JPN]
+nu = 1
+eta_g = 0.5679575500938786
+calib_commit = "e954395"
+mu_gbar = -0.7405226243582197
+delta_sig = 0.12288909742456931
+mu_p = -1.0320707563454399
+calib_window = [5, 26]
+c_v0 = 4.444284647879733
+lam0 = 0.018749253038167567
+
+[observation_sd]
+v = 0.05
+p = "max(0.10, 1*sd_delta)"
+w = 0.01
+P = 0.005
+g_swiid = "max(0.05, 2*se_delta)"
+phi = 0.05
+tau = 0.15
+T_proxy = 0.15
+y = 0.02

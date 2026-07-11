@@ -4,13 +4,24 @@
 # (接線行列は不要。EnKF はアンサンブル共分散で代用する、§9.1)。
 # イベント数 N(週次バッチ)は EnKF ではなくポアソン重み(weights.jl)で扱う。
 
-"1種類の観測の定義(スカラー観測)"
+"""
+1種類の観測の定義(スカラー観測)
+
+`target_ix`(DECISIONS #0043): h が「単一状態行の恒等写像」である場合の
+その状態行 index。0 = 不明/合成観測(:log_y 等)で、観測座標スプレッド床
+(AssimConfig.obs_spread_floor_frac)の対象外を意味する。既定 0 は後方互換。
+"""
 struct ObservationSpec
     name::Symbol
     period::Float64                 # 観測間隔(年)
     sd::Float64                     # 観測ノイズ標準偏差
     h::Function                     # xi(保持座標)→ 観測値
+    target_ix::Int                  # 恒等写像先の状態行(0 = 不明/合成観測、#0043)
 end
+
+"4引数コンストラクタ(target_ix 省略 = 0、既存呼び出しとの後方互換)"
+ObservationSpec(name::Symbol, period::Real, sd::Real, h::Function) =
+    ObservationSpec(name, float(period), float(sd), h, 0)
 
 """
     standard_observations(params) -> Vector{ObservationSpec}
@@ -54,6 +65,30 @@ end
 """
 observation_times(spec::ObservationSpec, t0::Real, t1::Real) =
     collect((t0 + spec.period):spec.period:t1)
+
+"""
+    augment_tauA_pseudo(batch, mult) -> Vector{ObservationRecord}
+
+DECISIONS #0036: tau(IX_TAU)への観測が届いた解析バッチに対し、同時刻・同値の
+擬似観測(name = `:tauA_pseudo`, h = xi -> xi[IX_TAUA], sd = mult × tau観測sd)
+を追加した新しいベクトルを返す(`batch` は破壊しない)。`mult <= 0` はオフ
+(既定動作 = 入力をそのまま返す)。tauA の解析更新が tau 観測方向へ緩く
+拘束され、EnKF擬似相関・EnKS遡及更新による無拘束ドリフト(#0035)を抑える。
+"""
+function augment_tauA_pseudo(batch::Vector{ObservationRecord}, mult::Real)
+    mult > 0 || return batch
+    out = copy(batch)
+    tauA_spec_cache = Dict{Float64,ObservationSpec}()
+    for o in batch
+        o.spec.name === :tau || continue
+        sd = mult * o.spec.sd
+        spec = get!(tauA_spec_cache, sd) do
+            ObservationSpec(:tauA_pseudo, o.spec.period, sd, xi -> xi[IX_TAUA], IX_TAUA)
+        end
+        push!(out, ObservationRecord(o.t, spec, o.value))
+    end
+    return out
+end
 
 """
     synthesize_observations(truth, specs; rng) -> Vector{ObservationRecord}

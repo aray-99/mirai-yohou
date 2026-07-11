@@ -51,20 +51,30 @@ const M8_AUG_SETTINGS = (
     a_T       = (link = :log,      init_sd = 0.1,   rw_sd = 0.05),
     r_phi     = (link = :log,      init_sd = 0.1,   rw_sd = 0.05),
     mu_gbar   = (link = :identity, init_sd = 0.1,   rw_sd = 0.05),
+    c_v0      = (link = :identity, init_sd = 0.1,   rw_sd = 0.05),
 )
 
 """
-M8 の拡大パラメータ記述子(DECISIONS #0046)を `params`(fit_exogenous・
-較正値適用済み)から構築する。初期値は theta_sig(非較正の L3 既定値)を
-除き較正済み中心(mu_gbar は EKI 較正値、netgrowth は fit_exogenous 値、
-a_T/r_phi は較正対象外なので §8.2 のレジーム既定値)を使う。
+M8 の拡大パラメータ記述子(DECISIONS #0046/#0049)を `params`(fit_exogenous・
+較正値適用済み)と国コード `country` から構築する。初期値は theta_sig(非較正の
+L3 既定値)を除き較正済み中心(mu_gbar/c_v0 は EKI 較正値、netgrowth は
+fit_exogenous 値、a_T/r_phi は較正対象外なので §8.2 のレジーム既定値)を使う。
+
+**国条件付き除外(#0049-2)**: `country == "JPN"` では theta_sig を拡大集合
+から除外する(イベント情報のほぼ無い国で RW が無拘束に漂流し λ を過大化する
+副作用 — #0048-3)。THA は #0046 どおり theta_sig を含める。除外時、theta_sig
+は augmented_params に現れないため member_params が触れず、較正済み定数と
+しての従来(非拡大)動作に自動的に戻る。
 """
-function build_m8_augmented_params(params::ModelParameters)
+function build_m8_augmented_params(params::ModelParameters, country::AbstractString)
     s = M8_AUG_SETTINGS
-    return AugmentedParam[
-        AugmentedParam(name = :theta_sig, link = s.theta_sig.link,
+    aug = AugmentedParam[]
+    if country != "JPN"
+        push!(aug, AugmentedParam(name = :theta_sig, link = s.theta_sig.link,
                        init = params.l3.theta_sig,
-                       init_sd = s.theta_sig.init_sd, rw_sd = s.theta_sig.rw_sd),
+                       init_sd = s.theta_sig.init_sd, rw_sd = s.theta_sig.rw_sd))
+    end
+    append!(aug, AugmentedParam[
         AugmentedParam(name = :netgrowth, link = s.netgrowth.link,
                        init = params.exo.netgrowth,
                        init_sd = s.netgrowth.init_sd, rw_sd = s.netgrowth.rw_sd),
@@ -77,7 +87,11 @@ function build_m8_augmented_params(params::ModelParameters)
         AugmentedParam(name = :mu_gbar, link = s.mu_gbar.link,
                        init = params.l2.mu_gbar,
                        init_sd = s.mu_gbar.init_sd, rw_sd = s.mu_gbar.rw_sd),
-    ]
+        AugmentedParam(name = :c_v0, link = s.c_v0.link,
+                       init = params.l2.c_v0,
+                       init_sd = s.c_v0.init_sd, rw_sd = s.c_v0.rw_sd),
+    ])
+    return aug
 end
 
 """
@@ -356,7 +370,7 @@ function run_country(country::String; N::Int = 100, seed::Integer = 20260708,
                       rtps_alpha = 0.85,                              # #0040-(β)
                       obs_spread_floor_frac = 0.5)                    # #0043
     E0_state = initial_ensemble(country, params, recs; N, seed = seed + 1)
-    aug = build_m8_augmented_params(params)                # #0046
+    aug = build_m8_augmented_params(params, country)        # #0046/#0049
     E0 = augment_ensemble(E0_state, aug; rng = Xoshiro(seed + 6))
     obs_counts = build_obs_counts(country, cfg)
     ncov = count(>=(0), obs_counts)

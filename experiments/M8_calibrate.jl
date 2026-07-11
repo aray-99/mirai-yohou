@@ -58,7 +58,7 @@ function calib_inputs(country; N, seed)
     obs_counts = build_obs_counts(country, cfg)
     event_times = filter(t -> t < cfg.t1, build_forced_jumps(country))
     nu0 = init_nu(obs_counts, cfg, params0, ccfg.calib)
-    return (; ccfg, recs, cfg, E0, obs_counts, event_times, nu0)
+    return (; country, ccfg, recs, cfg, E0, obs_counts, event_times, nu0)
 end
 
 """
@@ -79,7 +79,7 @@ function forward_G(inp, theta; N, seed)
     # (M8_AUG_SETTINGS)を使い、較正と検証の力学を一致させる。初期アンサンブル
     # の乱数は θ_j 間で共通(seed のみに依存)にして CRN 性を保つ(呼び出し側
     # は j に依らず同一の seed = seed_it を渡す設計、上記コメント参照)。
-    aug = build_m8_augmented_params(params)
+    aug = build_m8_augmented_params(params, inp.country)
     E0 = augment_ensemble(inp.E0, aug; rng = Xoshiro(seed))
     res = try
         run_assimilation(params, E0, recs, inp.event_times;

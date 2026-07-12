@@ -78,6 +78,41 @@ function count_loglik_negbin(ts, X, obs_counts, params, nu, r, cfg, window)
 end
 
 """
+    per_variable_diagnostics(recs, ts, X, window; rng) -> Dict{Symbol,Dict}
+
+観測変数ごとの被覆診断(#0056)。判定ロジックは coverage()(M8_hindcast.jl)
+と同一(Hamill 90% 区間、`r.spec.sd` ノイズ付加)だが、集計を変数別に分解し
+事前90%区間の幅(q95−q05)と符号付き中心バイアス(観測値 − アンサンブル平均)
+を追加で記録する。**独立の rng を新規に受け取るため、呼び出し元の既存の
+乱数消費列には一切影響しない**(coverage() 自体はそのまま呼び続け、本関数は
+診断専用の並行再計算)。lag は M9 の評価規約(#0052、解析更新を経ないので
+lag=0)に合わせて固定する。
+"""
+function per_variable_diagnostics(recs, ts, X, window; rng)
+    hits = Dict{Symbol,Int}(); ns = Dict{Symbol,Int}()
+    widths = Dict{Symbol,Vector{Float64}}(); biases = Dict{Symbol,Vector{Float64}}()
+    for r in recs
+        window[1] <= r.t < window[2] || continue
+        k = _prior_index(ts, r.t; lag = 0)
+        raw = [r.spec.h(view(X, :, k, j)) for j in 1:size(X, 3)]
+        y = raw .+ r.spec.sd .* randn(rng, length(raw))
+        q05, q95 = quantile(y, 0.05), quantile(y, 0.95)
+        name = r.spec.name
+        hits[name] = get(hits, name, 0) + (q05 <= r.value <= q95)
+        ns[name] = get(ns, name, 0) + 1
+        push!(get!(widths, name, Float64[]), q95 - q05)
+        push!(get!(biases, name, Float64[]), r.value - mean(raw))
+    end
+    names = union(keys(ns), keys(widths))
+    _safe(v) = isfinite(v) ? v : nothing
+    return Dict(string(name) => Dict(
+                    "hit" => get(hits, name, 0), "n" => get(ns, name, 0),
+                    "interval_width_mean" => _safe(mean(get(widths, name, [NaN]))),
+                    "center_bias_mean" => _safe(mean(get(biases, name, [NaN]))))
+                for name in names)
+end
+
+"""
     forecast_ensemble(params, aug, res; horizon, seed, dt) -> (; t, X)
 
 同化結果 `res` の最終時刻(オリジン t_k)のアンサンブル状態から、内生 Hawkes
@@ -206,6 +241,14 @@ function run_origin(country::String, t_k::Real,
     rng_cov2 = Xoshiro(seed + 10)
     cov_r, n_r, hit_r = coverage(recs_all, ts_free, Xf, eval_win; rng = rng_cov2, lag = 0)
 
+    # 変数別診断(#0056): 判定に使う被覆率(cov_f/cov_r 上)には手を入れず、
+    # 独立 rng(seed+11/+12、既存の乱数消費列とは無関係)で並行再計算する
+    # 診断専用の追加(coverage() のロジックをそのまま踏襲、集計のみ変数別)。
+    var_diag_fore = per_variable_diagnostics(recs_all, fe.t, fe.X, eval_win;
+                                             rng = Xoshiro(seed + 11))
+    var_diag_free = per_variable_diagnostics(recs_all, ts_free, Xf, eval_win;
+                                             rng = Xoshiro(seed + 12))
+
     err_fore = obs_errors(recs_all, fe.t, fe.X, eval_win; lag = 0)
     err_free = obs_errors(recs_all, ts_free, Xf, eval_win; lag = 0)
 
@@ -238,6 +281,7 @@ function run_origin(country::String, t_k::Real,
 
     return (; t_k = Float64(t_k), theta_center, nu_star, r_hat,
             cov_fore = (hit = hit_f, n = n_f), cov_free = (hit = hit_r, n = n_r),
+            var_diag_fore, var_diag_free,
             err_fore, err_free, ll_fore, ll_free, nwin = nwin_fore,
             resample = res.nresample, ess = extrema(res.ess))
 end
@@ -320,6 +364,25 @@ function run_walkforward(country::String; N::Int = 100, seed::Integer = 20260711
     ll_free_total = sum(r.ll_free for r in origin_results)
     nwin_total = sum(r.nwin for r in origin_results)
 
+    # プールの変数別被覆(#0056): per_origin の変数別診断(独立 rng 再計算、
+    # per_variable_diagnostics)から hit/n を全オリジンで合算する。判定
+    # (criteria.coverage)には使わない診断専用の集計。
+    var_cov_fore_pooled = Dict{String, Dict{String, Any}}()
+    var_cov_free_pooled = Dict{String, Dict{String, Any}}()
+    for (pooled, key) in ((var_cov_fore_pooled, :var_diag_fore),
+                          (var_cov_free_pooled, :var_diag_free))
+        for r in origin_results
+            for (name, d) in getproperty(r, key)
+                entry = get!(pooled, name, Dict("hit" => 0, "n" => 0))
+                entry["hit"] += d["hit"]
+                entry["n"] += d["n"]
+            end
+        end
+        for (_, entry) in pooled
+            entry["value"] = entry["n"] > 0 ? entry["hit"] / entry["n"] : nothing
+        end
+    end
+
     crit1 = 0.80 <= cov_pooled <= 0.98
     crit2 = nvars > 0 && nbetter > nvars ÷ 2
     crit3 = nwin_total > 0 ? ll_fore_total > ll_free_total : nothing
@@ -344,14 +407,19 @@ function run_walkforward(country::String; N::Int = 100, seed::Integer = 20260711
         "horizon" => M9_HORIZON,
         "criteria" => Dict(
             "coverage" => Dict("value" => cov_pooled, "n" => n_f, "hit" => hit_f,
-                               "pass" => crit1, "band" => [0.80, 0.98]),
+                               "pass" => crit1, "band" => [0.80, 0.98],
+                               # 変数別プール被覆(#0056、診断専用。判定は
+                               # 上の pooled value/hit/n のみで行い、この
+                               # by_variable は帰属分析用の内訳)
+                               "by_variable" => var_cov_fore_pooled),
             "rmse_majority_improve" => Dict("nbetter" => nbetter, "nvars" => nvars,
                                             "pass" => crit2),
             "count_loglik" => Dict("forecast" => ll_fore_total, "free" => ll_free_total,
                                    "nwin" => nwin_total,
                                    "pass" => crit3 === nothing ? nothing : crit3)),
         "variables" => var_detail,
-        "free_run_coverage" => Dict("value" => hit_r / max(n_r, 1), "n" => n_r, "hit" => hit_r),
+        "free_run_coverage" => Dict("value" => hit_r / max(n_r, 1), "n" => n_r, "hit" => hit_r,
+                                    "by_variable" => var_cov_free_pooled),
         "per_origin" => [Dict(
             "t_k" => r.t_k,
             "theta" => Dict(string(k) => v for (k, v) in r.theta_center),
@@ -359,6 +427,12 @@ function run_walkforward(country::String; N::Int = 100, seed::Integer = 20260711
             "r_hat" => isfinite(r.r_hat) ? r.r_hat : nothing,
             "coverage_forecast" => Dict("hit" => r.cov_fore.hit, "n" => r.cov_fore.n),
             "coverage_free" => Dict("hit" => r.cov_free.hit, "n" => r.cov_free.n),
+            # 変数別被覆診断(#0056): hit/n(coverage_forecast/free と同一の
+            # Hamill 90% 区間判定ロジックを独立 rng で変数別に再計算)と、
+            # 事前90%区間幅・符号付き中心バイアスの平均(過信 vs 中心バイアス
+            # の切り分け用)。判定への影響なし(診断専用の追加)
+            "variable_coverage_forecast" => r.var_diag_fore,
+            "variable_coverage_free" => r.var_diag_free,
             "ll_forecast" => r.ll_fore, "ll_free" => r.ll_free, "nwin" => r.nwin,
             "resample" => r.resample, "ess_range" => collect(r.ess))
             for r in origin_results],

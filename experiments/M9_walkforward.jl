@@ -356,7 +356,7 @@ function run_walkforward(country::String; N::Int = 100, seed::Integer = 20260711
             "t_k" => r.t_k,
             "theta" => Dict(string(k) => v for (k, v) in r.theta_center),
             "nu_star" => r.nu_star,
-            "r_hat" => r.r_hat,
+            "r_hat" => isfinite(r.r_hat) ? r.r_hat : nothing,
             "coverage_forecast" => Dict("hit" => r.cov_fore.hit, "n" => r.cov_fore.n),
             "coverage_free" => Dict("hit" => r.cov_free.hit, "n" => r.cov_free.n),
             "ll_forecast" => r.ll_fore, "ll_free" => r.ll_free, "nwin" => r.nwin,

@@ -176,7 +176,7 @@ function apply_obs_spread_floor!(E::AbstractMatrix{Float64},
     for o in batch
         ix = o.spec.target_ix
         ix == 0 && continue
-        z = [o.spec.h(view(E, 1:N_STATE, j)) for j in 1:N]
+        z = [o.spec.h(view(E, :, j)) for j in 1:N]
         zbar = sum(z) / N
         sd = sqrt(sum(abs2, z .- zbar) / (N - 1))
         floor = floor_frac * o.spec.sd
@@ -242,6 +242,7 @@ end
 の順で探し、いずれにも無ければエラー(現行モデルは名前衝突なし)。
 """
 function _aug_location(name::Symbol)
+    name === :obs_bias_g && return :obs
     name in fieldnames(L3Params) && return :l3
     name in fieldnames(ConstantExogenous) && return :exo
     name in fieldnames(L2Params) && return :l2
@@ -266,11 +267,15 @@ end
     _inject_param(p::ModelParameters, name, value) -> ModelParameters
 
 拡大パラメータ1個(自然単位の値)を注入した `ModelParameters` を返す
-(所属構造体は `_aug_location` で判定)。
+(所属構造体は `_aug_location` で判定)。`loc === :obs`(観測演算子専用の
+拡大、例: `obs_bias_g`、DECISIONS #0059)は力学に一切影響しないため
+no-op(`p` をそのまま返す)。
 """
 function _inject_param(p::ModelParameters, name::Symbol, value::Float64)
     loc = _aug_location(name)
-    if loc === :l3
+    if loc === :obs
+        return p
+    elseif loc === :l3
         return ModelParameters(p.regime, p.l1, p.l2, _with_field(p.l3, name, value),
                                p.exo, p.x0_nat, p.x0)
     elseif loc === :exo
@@ -560,14 +565,14 @@ function run_assimilation(params::ModelParameters, E0::Matrix{Float64},
             # 加えるのがランクヒストグラムの標準定義(Hamill 2001、#0017)。
             # 省くと高頻度観測変数で見かけの過小分散が生じる。
             for o in batch
-                yj = [o.spec.h(view(E, 1:N_STATE, j)) + o.spec.sd * randn(rank_rng)
+                yj = [o.spec.h(view(E, :, j)) + o.spec.sd * randn(rank_rng)
                       for j in 1:N]
                 push!(get!(ranks, o.spec.name, Int[]),
                       count(<(o.value), yj) + 1)
             end
             yobs = [o.value for o in batch]
             R = Diagonal([o.spec.sd^2 for o in batch]) |> Matrix
-            hfun = col -> [o.spec.h(view(col, 1:N_STATE)) for o in batch]
+            hfun = col -> [o.spec.h(col) for o in batch]
 
             # 現在時刻解析の変数局所化(#0040-(α))
             masked_rows = select_masked_rows(cfg, batch)

@@ -197,7 +197,6 @@ function run_origin(country::String, t_k::Real,
     params0 = build_params(ccfg.regime)
     recs_all = build_observations(country, params0; t1 = t_fore_end)
     params = fit_exogenous(build_params(ccfg.regime; kw...), recs_all, window)
-    recs_calib = [r for r in recs_all if r.t <= t_k]
 
     # (b) t_k までの同化(M8 検証ランと同一の AssimConfig)
     cfg = AssimConfig(t0 = 0.0, t1 = Float64(t_k), smoother_lag = 5.0,
@@ -210,6 +209,10 @@ function run_origin(country::String, t_k::Real,
                       rejuvenation_a = REJUVENATION_A)   # #0057
     E0_state = initial_ensemble(country, params, recs_all; N, seed = seed + 1)
     aug = build_m8_augmented_params(params, country; include_theta_sig)
+    # g_swiid の h を b_g 対応版に差し替えるため recs_all を再構築
+    # (DECISIONS #0059)。以降の recs_calib・coverage・診断はすべてこちらを使う。
+    recs_all = build_observations(country, params0; t1 = t_fore_end, augmented_params = aug)
+    recs_calib = [r for r in recs_all if r.t <= t_k]
     E0 = augment_ensemble(E0_state, aug; rng = Xoshiro(seed + 6))
     obs_counts = build_obs_counts(country, cfg)
     event_times = filter(t -> t < cfg.t1,
@@ -235,6 +238,19 @@ function run_origin(country::String, t_k::Real,
                                cfg, seed, obs_counts, count_scale = nu_star,
                                count_model = :negbin, count_dispersion = r_hat,
                                augmented_params = aug)
+    end
+
+    # 拡大パラメータ事後の診断表示(#0046/#0049。b_g は #0059 の追加診断:
+    # 大きさ・安定性の記録目的で、判定には使わない)
+    b_g_posterior = nothing
+    for (k, ap) in enumerate(aug)
+        final_link = res.X[N_STATE + k, end, :]
+        natural = ap.link === :log ? exp.(final_link) : final_link
+        m = sum(natural) / length(natural)
+        sdv = sqrt(sum(abs2, natural .- m) / (length(natural) - 1))
+        println("  拡大パラメータ $(ap.name): 事後平均 ", round(m, digits = 5),
+                "  sd ", round(sdv, digits = 5), "(初期 ", round(ap.init, digits = 5), ")")
+        ap.name === :obs_bias_g && (b_g_posterior = (mean = m, sd = sdv))
     end
 
     # (c) 1年先予報アンサンブル(拡大事後値の持ち込み + RW 継続、#0053)
@@ -296,7 +312,7 @@ function run_origin(country::String, t_k::Real,
             cov_fore = (hit = hit_f, n = n_f), cov_free = (hit = hit_r, n = n_r),
             var_diag_fore, var_diag_free,
             err_fore, err_free, ll_fore, ll_free, nwin = nwin_fore,
-            resample = res.nresample, ess = extrema(res.ess))
+            resample = res.nresample, ess = extrema(res.ess), b_g_posterior)
 end
 
 """
@@ -447,7 +463,10 @@ function run_walkforward(country::String; N::Int = 100, seed::Integer = 20260711
             "variable_coverage_forecast" => r.var_diag_fore,
             "variable_coverage_free" => r.var_diag_free,
             "ll_forecast" => r.ll_fore, "ll_free" => r.ll_free, "nwin" => r.nwin,
-            "resample" => r.resample, "ess_range" => collect(r.ess))
+            "resample" => r.resample, "ess_range" => collect(r.ess),
+            # b_g(g_swiid 観測バイアス)事後の大きさ・安定性(#0059、診断専用)
+            "b_g_posterior" => r.b_g_posterior === nothing ? nothing :
+                Dict("mean" => r.b_g_posterior.mean, "sd" => r.b_g_posterior.sd))
             for r in origin_results],
         "elapsed_sec" => elapsed,
         "provenance" => Dict(

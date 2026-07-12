@@ -52,6 +52,7 @@ const M8_AUG_SETTINGS = (
     r_phi     = (link = :log,      init_sd = 0.1,   rw_sd = 0.05),
     mu_gbar   = (link = :identity, init_sd = 0.1,   rw_sd = 0.05),
     c_v0      = (link = :identity, init_sd = 0.1,   rw_sd = 0.05),
+    obs_bias_g = (link = :identity, init_sd = 0.1,  rw_sd = 0.05),
 )
 
 """
@@ -94,6 +95,13 @@ function build_m8_augmented_params(params::ModelParameters, country::AbstractStr
                        init = params.l2.c_v0,
                        init_sd = s.c_v0.init_sd, rw_sd = s.c_v0.rw_sd),
     ])
+    # g_swiid 観測バイアス b_g(DECISIONS #0059)。観測演算子専用の拡大
+    # (力学に無関係、_aug_location(:obs_bias_g) === :obs で no-op 注入)。
+    # 両国一律・無条件に付与し、常に最後の要素にする(行位置 N_STATE +
+    # length(aug) が theta_sig 有無に関わらず決定的)。
+    push!(aug, AugmentedParam(name = :obs_bias_g, link = s.obs_bias_g.link,
+                   init = 0.0, init_sd = s.obs_bias_g.init_sd,
+                   rw_sd = s.obs_bias_g.rw_sd))
     return aug
 end
 
@@ -427,6 +435,10 @@ function run_country(country::String; N::Int = 100, seed::Integer = 20260708,
                       rejuvenation_a = rejuvenation_a)                # #0057
     E0_state = initial_ensemble(country, params, recs; N, seed = seed + 1)
     aug = build_m8_augmented_params(params, country)        # #0046/#0049
+    # g_swiid の h を b_g 対応版に差し替えるため recs を再構築(DECISIONS #0059)。
+    # initial_ensemble/fit_exogenous は .value/.t/.spec.name のみ参照するため
+    # 上の再構築前 recs で問題ないが、以降(recs_run 含む)はこちらを使う。
+    recs = build_observations(country, params0; t1 = T1, augmented_params = aug)
     E0 = augment_ensemble(E0_state, aug; rng = Xoshiro(seed + 6))
     obs_counts = build_obs_counts(country, cfg)
     ncov = count(>=(0), obs_counts)

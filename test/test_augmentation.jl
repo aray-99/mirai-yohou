@@ -27,6 +27,7 @@ _std(v) = sqrt(sum(abs2, v .- _mean(v)) / (length(v) - 1))
         @test MiraiYohou._aug_location(:a_T) === :l2
         @test MiraiYohou._aug_location(:r_phi) === :l2
         @test MiraiYohou._aug_location(:mu_gbar) === :l2
+        @test MiraiYohou._aug_location(:obs_bias_g) === :obs   # #0059: 観測演算子専用(力学に無関係)
         @test_throws ArgumentError MiraiYohou._aug_location(:not_a_field)
     end
 
@@ -46,6 +47,11 @@ _std(v) = sqrt(sum(abs2, v .- _mean(v)) / (length(v) - 1))
         @test p4.exo.netgrowth == -0.02
         @test p4.exo.wbar == params.exo.wbar           # ConstantExogenous の他フィールドは不変
         @test p4.l2 === params.l2
+
+        # obs_bias_g(#0059): 観測演算子専用の拡大は力学に無関係 → no-op
+        # (注入値に関わらず p をそのまま返す。referential 一致まで確認)
+        p5 = MiraiYohou._inject_param(params, :obs_bias_g, 0.37)
+        @test p5 === params
     end
 
     @testset "build_member_params: 複数記述子を順に注入する" begin
@@ -266,5 +272,45 @@ _std(v) = sqrt(sum(abs2, v .- _mean(v)) / (length(v) - 1))
         masked = MiraiYohou.select_masked_rows(cfg, batch)
         @test masked == [IX_TAUA]
         @test !(N_STATE + 1 in masked) && !(N_STATE + 2 in masked)
+    end
+
+    @testset "g_swiid 観測バイアス b_g(#0059): 全列 h によるゲイン更新" begin
+        # build_observations.jl の g_swiid 用 h(h(x) = xi[IX_G] + xi[bias_row]、
+        # 拡大行が無いベクトルには 0 扱いで後方互換)を直接模して、
+        # (i) N_STATE 長ベクトルでも安全に呼べること、(ii) 拡大込みの
+        # enkf_analysis!(hfun がもはや 1:N_STATE に切り詰めない、
+        # src/assimilation.jl の変更点そのもの)で b_g がクロス共分散を
+        # 通じて実際に更新されることを確認する。
+        bias_row = N_STATE + 1
+        h_g = xi -> length(xi) >= bias_row ? xi[IX_G] + xi[bias_row] : xi[IX_G]
+
+        # (i) N_STATE 長(自由ラン相当)では常に b_g = 0 扱い
+        xi_short = zeros(N_STATE); xi_short[IX_G] = 0.7
+        @test h_g(xi_short) == 0.7
+
+        # (ii) 拡大込みアンサンブルで b_g が観測イノベーション方向へ動く
+        rng = Xoshiro(4242)
+        N = 4000
+        E = zeros(N_STATE + 1, N)
+        E[IX_G, :] .= 0.05 .* randn(rng, N)             # g ≈ 0(モデル平衡近傍)
+        E[bias_row, :] .= 0.6 .+ 0.05 .* randn(rng, N)   # b_g は THA 診断値(#0058)近傍で初期化
+
+        spec_g = ObservationSpec(:g_swiid, 1.0, 0.05, h_g)
+        batch = [ObservationRecord(1.0, spec_g, 0.0)]    # 観測値 0(バイアスなしを示唆)
+        yobs = [o.value for o in batch]
+        R = Diagonal([o.spec.sd^2 for o in batch]) |> Matrix
+        hfun = col -> [o.spec.h(col) for o in batch]
+
+        mean_g_before = sum(E[IX_G, :]) / N
+        mean_b_before = sum(E[bias_row, :]) / N
+        enkf_analysis!(E, yobs, hfun, R; rng, rho_inf = 1.0)
+        mean_g_after = sum(E[IX_G, :]) / N
+        mean_b_after = sum(E[bias_row, :]) / N
+
+        # g と b_g は解析前に無相関(独立乱数)だが、どちらも h に等しく
+        # 寄与するため事前分散に応じて両方が観測方向(0)へ引かれる。
+        @test mean_g_after < mean_g_before
+        @test mean_b_after < mean_b_before
+        @test mean_b_after < 0.6 - 0.05   # 有意に引かれていること
     end
 end

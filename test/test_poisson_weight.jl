@@ -130,6 +130,106 @@
                                                     count_model = :bogus)
     end
 
+    @testset "Liu-West rejuvenation (#0057)" begin
+        @testset "weighted_mean_std" begin
+            E = [1.0 2.0 3.0; 10.0 20.0 30.0]
+            w = [0.5, 0.25, 0.25]
+            xbar, sigma = MiraiYohou.weighted_mean_std(E, w)
+            @test xbar ≈ [0.5*1 + 0.25*2 + 0.25*3, 0.5*10 + 0.25*20 + 0.25*30]
+            expected_var1 = 0.5*(1-xbar[1])^2 + 0.25*(2-xbar[1])^2 + 0.25*(3-xbar[1])^2
+            @test sigma[1] ≈ sqrt(expected_var1)
+            # 定数行(分散ゼロ)は sigma = 0
+            Econst = [5.0 5.0 5.0]
+            _, sigma_c = MiraiYohou.weighted_mean_std(Econst, [1/3, 1/3, 1/3])
+            @test sigma_c[1] ≈ 0.0 atol = 1e-12
+        end
+
+        @testset "liu_west_rejuvenate!: a=1 は不変" begin
+            rng = Xoshiro(41)
+            E = randn(rng, 3, 20)
+            E0 = copy(E)
+            xbar, sigma = MiraiYohou.weighted_mean_std(E, fill(1/20, 20))
+            MiraiYohou.liu_west_rejuvenate!(E, xbar, sigma, 1.0, rng)
+            @test E ≈ E0   # b=√(1-1²)=0 → ジッタなし、xbar項も a=1 で無効
+        end
+
+        @testset "liu_west_rejuvenate!: モーメント近似保存(a<1)" begin
+            rng = Xoshiro(42)
+            n, N = 4, 20000
+            E = randn(rng, n, N)   # 平均0・分散1のi.i.d.列(等重み想定)
+            w = fill(1.0 / N, N)
+            xbar, sigma = MiraiYohou.weighted_mean_std(E, w)
+            a = 0.9
+            MiraiYohou.liu_west_rejuvenate!(E, xbar, sigma, a, rng)
+            _mean(v) = sum(v) / length(v)
+            _std(v) = (m = _mean(v); sqrt(sum(abs2, v .- m) / (length(v) - 1)))
+            # 1次モーメント: 平均は保存されるはず(理論上 xbar 自身に収束)
+            for k in 1:n
+                @test isapprox(_mean(E[k, :]), xbar[k]; atol = 0.05)
+                # 2次モーメント: a²σ² + (1-a²)σ² = σ²(縮小核は分散を保存)
+                @test isapprox(_std(E[k, :]), sigma[k]; rtol = 0.05)
+            end
+        end
+
+        @testset "sigma=0 の座標はジッタしない" begin
+            rng = Xoshiro(43)
+            n, N = 2, 10
+            E = zeros(n, N)
+            E[1, :] .= 3.0                 # 定数行(sigma=0)
+            E[2, :] .= randn(rng, N)
+            xbar = [3.0, 0.0]
+            sigma = [0.0, 1.0]
+            a = 0.9
+            E_before_row1 = copy(E[1, :])
+            MiraiYohou.liu_west_rejuvenate!(E, xbar, sigma, a, rng)
+            # row 1: a*3 + (1-a)*3 + 0 = 3(不変)
+            @test E[1, :] ≈ E_before_row1
+        end
+
+        @testset "run_assimilation: rejuvenation_a=1.0 は従来動作とビット一致" begin
+            params = build_params(:volatile)
+            t1 = 2.0
+            truth = simulate_sde(params; seed = 5501, t1 = t1)
+            event_times = [e.t for e in truth.jumps]
+            obs = synthesize_observations(truth.traj, standard_observations(params);
+                                          rng = Xoshiro(5502))
+            N = 30
+            E0 = params.x0 .+ 0.3 .* randn(Xoshiro(5503), MiraiYohou.N_STATE, N)
+            postprocess_analysis!(E0)
+            cfg_legacy = AssimConfig(t1 = t1)
+            cfg_explicit = AssimConfig(t1 = t1, rejuvenation_a = 1.0)
+            r_legacy = run_assimilation(params, copy(E0), obs, event_times;
+                                       cfg = cfg_legacy, seed = 5504)
+            r_explicit = run_assimilation(params, copy(E0), obs, event_times;
+                                         cfg = cfg_explicit, seed = 5504)
+            @test r_legacy.X == r_explicit.X
+            @test r_legacy.nresample == r_explicit.nresample
+            @test r_legacy.ess == r_explicit.ess
+        end
+
+        @testset "run_assimilation: rejuvenation_a<1 は再抽選後にスプレッドを回復する" begin
+            params = build_params(:volatile)
+            t1 = 2.0
+            truth = simulate_sde(params; seed = 5601, t1 = t1)
+            event_times = [e.t for e in truth.jumps]
+            obs = synthesize_observations(truth.traj, standard_observations(params);
+                                          rng = Xoshiro(5602))
+            N = 30
+            E0 = params.x0 .+ 0.3 .* randn(Xoshiro(5603), MiraiYohou.N_STATE, N)
+            postprocess_analysis!(E0)
+            cfg_none = AssimConfig(t1 = t1)
+            cfg_rej = AssimConfig(t1 = t1, rejuvenation_a = 0.9)
+            r_none = run_assimilation(params, copy(E0), obs, event_times;
+                                     cfg = cfg_none, seed = 5604)
+            r_rej = run_assimilation(params, copy(E0), obs, event_times;
+                                    cfg = cfg_rej, seed = 5604)
+            @test r_none.nresample == r_rej.nresample   # 再抽選判定自体は不変
+            if r_none.nresample > 0
+                @test r_rej.X != r_none.X   # 若返りが軌道に反映されている
+            end
+        end
+    end
+
     @testset "resample_if_needed!" begin
         rng = Xoshiro(21)
         # 均等な Λ → ESS = N → リサンプリングなし

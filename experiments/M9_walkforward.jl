@@ -41,6 +41,18 @@ const M9_ORIGINS = Dict(
 const M9_HORIZON = 1.0    # 1年先予報(#0052)
 
 """
+再抽選後 Liu-West 若返りの縮小係数(DECISIONS #0057)。事前選定プロトコル
+(候補 a ∈ {0.90, 0.95, 0.99}、THA 較正窓 t=20..28・M8 凍結較正値・N=100・
+NegBin (ν*, r̂) 窓内プロファイル、窓内の事前90%被覆が名目 0.90 に最も近い
+a を採用、同点は大きい a)の結果(2026-07-12 実施):
+  a=0.90 → 事前被覆 0.8154 (53/65)  nresample=17
+  a=0.95 → 事前被覆 0.8308 (54/65)  nresample=17
+  a=0.99 → 事前被覆 0.8000 (52/65)  nresample=16
+採用: a = 0.95(|0.8308−0.90| が最小)。以後変更しない(#0057)。
+"""
+const REJUVENATION_A = 0.95
+
+"""
 theta_sig 拡大の適用しきい値(#0052/#0054 のデータ規則): **初回オリジン
 時点の較正窓のフィルタ後週次カウント合計 ΣN ≥ 50 なら theta_sig を拡大集合に
 含める**。#0049 の国条件(JPN 除外・THA 適用)をデータ規則として置き換えた
@@ -194,7 +206,8 @@ function run_origin(country::String, t_k::Real,
                       analysis_masked_vars = [IX_TAUA],
                       analysis_unmask_names = [:tau, :tauA_pseudo],
                       rtps_alpha = 0.85,
-                      obs_spread_floor_frac = 0.5)
+                      obs_spread_floor_frac = 0.5,
+                      rejuvenation_a = REJUVENATION_A)   # #0057
     E0_state = initial_ensemble(country, params, recs_all; N, seed = seed + 1)
     aug = build_m8_augmented_params(params, country; include_theta_sig)
     E0 = augment_ensemble(E0_state, aug; rng = Xoshiro(seed + 6))

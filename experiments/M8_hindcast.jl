@@ -394,7 +394,8 @@ function load_calibrated(country)
 end
 
 function run_country(country::String; N::Int = 100, seed::Integer = 20260708,
-                     smoke::Bool = false, calibrated::Bool = false)
+                     smoke::Bool = false, calibrated::Bool = false,
+                     rejuvenation_a::Float64 = 1.0)
     ccfg = COUNTRY_CFG[country]
     params0 = build_params(ccfg.regime)
     println("== $country ($(ccfg.regime)) ==")
@@ -422,7 +423,8 @@ function run_country(country::String; N::Int = 100, seed::Integer = 20260708,
                       analysis_masked_vars = [IX_TAUA],               # #0040-(α)
                       analysis_unmask_names = [:tau, :tauA_pseudo],   # #0040-(α)
                       rtps_alpha = 0.85,                              # #0040-(β)
-                      obs_spread_floor_frac = 0.5)                    # #0043
+                      obs_spread_floor_frac = 0.5,                    # #0043
+                      rejuvenation_a = rejuvenation_a)                # #0057
     E0_state = initial_ensemble(country, params, recs; N, seed = seed + 1)
     aug = build_m8_augmented_params(params, country)        # #0046/#0049
     E0 = augment_ensemble(E0_state, aug; rng = Xoshiro(seed + 6))

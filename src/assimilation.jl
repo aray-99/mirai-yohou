@@ -63,6 +63,14 @@ Base.@kwdef struct AssimConfig
     # ガウス摂動を加えて sd を floor まで回復してから解析する。既定 0.0 =
     # オフ(後方互換)。ゲイン消失(#0042-1)への対処。
     obs_spread_floor_frac::Float64 = 0.0
+    # 再抽選後の Liu-West 若返り縮小係数(DECISIONS #0057)。系統再抽選が
+    # 発火した窓で、再抽選前の重み付きアンサンブル平均 x̄・座標別標準偏差 σ
+    # (状態+拡大の全行)を用い、再抽選後の各粒子を
+    # x′ = a·x + (1−a)·x̄ + √(1−a²)·σ·ε(ε〜N(0,I)) で置換する
+    # (1次・2次モーメント保存)。既定 1.0 = 若返り無効(従来動作と完全同一、
+    # 統計計算もスキップ)。EnKS ラグ窓スナップショットは対象外
+    # (インデックス再抽選のみ、過去断面への遡及ジッタはしない)。
+    rejuvenation_a::Float64 = 1.0
 end
 
 "同化ランの結果(X は状態行 × 時刻 × メンバー。拡大時は N_STATE+1 行目以降が拡大パラメータ、#0046)"
@@ -91,6 +99,44 @@ function pathological(xi::AbstractVector{Float64})
         abs(xi[i]) > 15 && return true
     end
     return xi[IX_SIG] > 3
+end
+
+"""
+    liu_west_rejuvenate!(E, xbar, sigma, a, rng) -> E
+
+Liu-West 縮小核による若返り(DECISIONS #0057)。系統再抽選**後**の `E`
+(全行 × N メンバー)の各粒子列を
+`x′ = a·x + (1−a)·xbar + √(1−a²)·sigma·ε`(ε〜N(0,I))で置換する
+(再抽選前の重み付き平均 `xbar`・座標別標準偏差 `sigma` を用い、1次・2次
+モーメントを保存)。`sigma` が 0 または非有限の座標はジッタしない
+(その行は `a·x + (1−a)·xbar` のみ、`a=1` かつ `xbar` 無関係なら不変)。
+"""
+function liu_west_rejuvenate!(E::AbstractMatrix{Float64}, xbar::AbstractVector{Float64},
+                               sigma::AbstractVector{Float64}, a::Float64, rng::AbstractRNG)
+    n, N = size(E)
+    b = sqrt(max(1 - a^2, 0.0))
+    for i in 1:N
+        for k in 1:n
+            jitter = (isfinite(sigma[k]) && sigma[k] > 0) ? b * sigma[k] * randn(rng) : 0.0
+            E[k, i] = a * E[k, i] + (1 - a) * xbar[k] + jitter
+        end
+    end
+    return E
+end
+
+"""
+    weighted_mean_std(E, w) -> (xbar, sigma)
+
+重み `w`(正規化済み、和1)によるアンサンブル `E`(全行 × N メンバー)の
+座標別加重平均 `xbar` と加重標準偏差 `sigma`(不偏補正なし、母標準偏差)を
+返す。DECISIONS #0057 の若返り統計(再抽選前に評価)。
+"""
+function weighted_mean_std(E::AbstractMatrix{Float64}, w::AbstractVector{Float64})
+    n, N = size(E)
+    xbar = [sum(w[i] * E[k, i] for i in 1:N) for k in 1:n]
+    var = [sum(w[i] * (E[k, i] - xbar[k])^2 for i in 1:N) for k in 1:n]
+    sigma = sqrt.(max.(var, 0.0))
+    return xbar, sigma
 end
 
 """
@@ -470,12 +516,22 @@ function run_assimilation(params::ModelParameters, E0::Matrix{Float64},
             essval = ess(w)
             push!(ess_hist, essval)
             if npath > 0 || essval < N * cfg.ess_ratio
+                # 若返り統計(DECISIONS #0057)は再抽選**前**の重み付きアンサンブルで
+                # 評価する。a == 1.0(既定・若返り無効)なら計算をスキップして
+                # 従来動作と完全同一(ビット一致)にする。
+                do_rejuvenate = cfg.rejuvenation_a < 1.0
+                xbar, sigma = do_rejuvenate ? weighted_mean_std(E, w) :
+                              (Float64[], Float64[])
                 idx = systematic_resample(rngs[1], w)
                 E .= E[:, idx]
                 # メンバー対応を保つため、ラグ窓内のスナップショットも同じ
-                # インデックスで再抽選する(EnKS、#0024)
+                # インデックスで再抽選する(EnKS、#0024)。ジッタは加えない
+                # (過去断面への遡及ジッタはしない、#0057)。
                 for s in lag_start:length(snaps)
                     snaps[s] .= snaps[s][:, idx]
+                end
+                if do_rejuvenate
+                    liu_west_rejuvenate!(E, xbar, sigma, cfg.rejuvenation_a, rngs[1])
                 end
                 fill!(logw, 0.0)
                 nresample += 1

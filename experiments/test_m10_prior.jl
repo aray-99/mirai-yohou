@@ -1,6 +1,7 @@
-# M10 prior 規則(DECISIONS #0062)の単体テスト:
+# M10 prior 規則(DECISIONS #0062/#0064)の単体テスト:
 #   (1) gbar_anchor の窓内 logit 平均計算
 #   (2) prior_sd_override が calibrate の事前アンサンブル摂動に正しく伝わること
+#   (3) validate_prior(#0064)の静的妥当性リサンプリングと後方互換
 #
 # experiments/M8_hindcast.jl 系列と同じ理由(パッケージテスト環境に無い
 # Dates/JSON3/TOML 等に依存)で package の test/runtests.jl には組み込まず
@@ -69,6 +70,65 @@ end
     mu_gbar_u = [e[4] for e in ens_u]
     mu_p_u = [e[5] for e in ens_u]
     @test isapprox(std(mu_gbar_u), std(mu_p_u); rtol = 0.35)
+end
+
+@testset "validate_prior 静的妥当性リサンプリング(#0064)" begin
+    # M10 本番と同一系譜の設定(JPN・オリジン t=28・#0063 凍結シード):
+    # seed = 20260711 + 28 + 101 = 20260840。H の初期ドローは N に依存しない
+    # (rng = Xoshiro(seed) を消費するのは H とリサンプリングのみ)ので、
+    # N=5・iters=0 で本番 J=24 の初期 H を厳密に再現できる。
+    country = "JPN"
+    window = (5.0, 28.0)
+    seed = 20260711 + 28 + 101
+    J = 24
+    frozen = load_calibrated(country)
+    prior_center = merge(
+        Dict(CAL_PARAMS[k].name => Float64(getproperty(frozen, CAL_PARAMS[k].name))
+             for k in eachindex(CAL_PARAMS)),
+        Dict(:mu_gbar => gbar_anchor(country, window)))
+    prior_sd_override = Dict(:mu_gbar => 0.3)
+
+    ccfg = COUNTRY_CFG[country]
+    params0 = build_params(ccfg.regime)
+    recs0 = build_observations(country, params0; t1 = window[2])
+
+    # (a) validate_prior = true: 全列が静的チェックを通る
+    calib_v = calibrate(country; J, iters = 0, N = 5, seed, window,
+                        prior_center, prior_sd = 0.5, prior_sd_override,
+                        save = false, validate_prior = true)
+    ens_v = calib_v.out["ensemble_final"]
+    @test length(ens_v) == J
+    @test all(static_theta_valid(ccfg.regime, collect(theta), recs0, window)
+              for theta in ens_v)
+
+    # (b) validate_prior = false(既定): 従来と同一ドロー。手計算の
+    # H = eta0 .+ sd_vec .* randn(Xoshiro(seed), d, J) と厳密一致することで
+    # 乱数消費が #0064 実装前と変わらないことを固定する(後方互換)。
+    calib_f = calibrate(country; J, iters = 0, N = 5, seed, window,
+                        prior_center, prior_sd = 0.5, prior_sd_override,
+                        save = false)   # validate_prior 省略 = false
+    ens_f = calib_f.out["ensemble_final"]
+    theta0 = [prior_center[p.name] for p in CAL_PARAMS]
+    eta0 = to_eta(theta0)
+    sd_vec = [Float64(get(prior_sd_override, CAL_PARAMS[k].name, 0.5))
+              for k in eachindex(CAL_PARAMS)]
+    H_manual = eta0 .+ sd_vec .* randn(Xoshiro(seed), length(eta0), J)
+    for j in 1:J
+        @test collect(ens_f[j]) ≈ from_eta(H_manual[:, j]) atol = 1e-12
+    end
+
+    # (c) この seed では素の prior に無効列が存在する(= (a) のリサンプリングが
+    # 実際に作動したこと)。JPN prior は delta_sig の下方ドローで De>1 に
+    # 落ちる確率が構造的に 3〜4 割ある(#0064 診断)ので J=24 でほぼ確実。
+    invalid_f = count(!static_theta_valid(ccfg.regime, collect(theta), recs0, window)
+                      for theta in ens_f)
+    @test invalid_f > 0
+    # 有効列は validate_prior 有無で不変(無効列だけが差し替えられる)
+    for j in 1:J
+        if static_theta_valid(ccfg.regime, from_eta(H_manual[:, j]), recs0, window)
+            @test collect(ens_v[j]) ≈ from_eta(H_manual[:, j]) atol = 1e-12
+        end
+    end
 end
 
 println("OK: M10 prior 規則テスト green")

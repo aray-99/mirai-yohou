@@ -159,7 +159,8 @@ end
 
 """
     run_origin(country, t_k, prior_center; N, seed, J, iters, N_eki,
-               include_theta_sig, prior_sd_override = nothing) -> NamedTuple
+               include_theta_sig, prior_sd_override = nothing,
+               validate_prior = false) -> NamedTuple
 
 1オリジン分の (較正 → 同化 → 予報 → 自由ラン → 評価)。戻り値に次オリジンへ
 の warm-start 用 `theta_center`(Dict)と評価指標一式を含む。
@@ -175,7 +176,8 @@ function run_origin(country::String, t_k::Real,
                     prior_center::Union{Nothing,Dict};
                     N::Int, seed::Integer, J::Int, iters::Int, N_eki::Int,
                     include_theta_sig::Bool,
-                    prior_sd_override::Union{Nothing,AbstractDict} = nothing)
+                    prior_sd_override::Union{Nothing,AbstractDict} = nothing,
+                    validate_prior::Bool = false)
     ccfg = COUNTRY_CFG[country]
     win_start = ccfg.calib[1]
     window = (win_start, Float64(t_k))
@@ -187,10 +189,11 @@ function run_origin(country::String, t_k::Real,
     # (a) EKI 再較正(expanding window, warm-start, prior sd 復元)。
     # ミスフィット定義は M8 手続きのまま(#0054: EKI 内部は変更しない)。
     # `prior_sd_override` は既定 nothing(M9 の従来動作を変えない後方互換)、
-    # M10(#0062)は mu_gbar のみ独立 sd を渡す。
+    # M10(#0062)は mu_gbar のみ独立 sd を渡す。`validate_prior` も既定 false
+    # (M9 の従来動作)、M10(#0064)は true を渡す。
     calib = calibrate(country; J, iters, N = N_eki, seed = seed + 101,
                       window, prior_center, prior_sd = 0.5, prior_sd_override,
-                      save = false, include_theta_sig)
+                      save = false, include_theta_sig, validate_prior)
     theta_hat, nu_eki = calib.theta_hat, calib.nu_star
     theta_center = Dict(CAL_PARAMS[k].name => theta_hat[k] for k in eachindex(CAL_PARAMS))
     kw = theta_center

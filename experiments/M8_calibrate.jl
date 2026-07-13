@@ -42,12 +42,21 @@ function params_from_theta(regime, theta)
     return build_params(regime; kw...)
 end
 
-"較正の前処理(θ 非依存の入力を1回だけ構築)"
-function calib_inputs(country; N, seed)
+"""
+較正の前処理(θ 非依存の入力を1回だけ構築)。
+
+`window` 省略時は国既定の較正窓(#0030-4、M8 の従来動作)。M9(#0052)の
+expanding walk-forward では `(窓開始, オリジン t_k)` を明示的に渡し、
+オリジン以前のデータのみで較正する(検証区間は較正・同化とも未参照)。
+`include_theta_sig` は theta_sig 拡大の適用可否(既定 = M8 の国条件 #0049-2。
+M9 はデータ規則 #0054 の判定結果を渡す)。
+"""
+function calib_inputs(country; N, seed, window = COUNTRY_CFG[country].calib,
+                      include_theta_sig::Bool = country != "JPN")
     ccfg = COUNTRY_CFG[country]
     params0 = build_params(ccfg.regime)
-    recs = build_observations(country, params0; t1 = ccfg.calib[2])
-    cfg = AssimConfig(t0 = 0.0, t1 = ccfg.calib[2], smoother_lag = 0.0,
+    recs = build_observations(country, params0; t1 = window[2])
+    cfg = AssimConfig(t0 = 0.0, t1 = window[2], smoother_lag = 0.0,
                       smoother_vars = [IX_G, IX_TAU, IX_SIG, IX_PP],  # #0036: tauA除外
                       tauA_pseudo_sd_mult = 3.0,                     # #0036
                       analysis_masked_vars = [IX_TAUA],               # #0040-(α)
@@ -56,9 +65,11 @@ function calib_inputs(country; N, seed)
                       obs_spread_floor_frac = 0.5)                    # #0043
     E0 = initial_ensemble(country, params0, recs; N, seed = seed + 1)
     obs_counts = build_obs_counts(country, cfg)
-    event_times = filter(t -> t < cfg.t1, build_forced_jumps(country))
-    nu0 = init_nu(obs_counts, cfg, params0, ccfg.calib)
-    return (; country, ccfg, recs, cfg, E0, obs_counts, event_times, nu0)
+    event_times = filter(t -> t < cfg.t1,
+                         build_forced_jumps(country; calib_window = window))
+    nu0 = init_nu(obs_counts, cfg, params0, window)
+    return (; country, ccfg, window, recs, cfg, E0, obs_counts, event_times, nu0,
+            include_theta_sig)
 end
 
 """
@@ -67,9 +78,9 @@ h_logy が使う θ_T/θ_phi/α は較正対象外なので観測レコードは
 発散・レジーム違反ランは nothing(EKI 更新から除外)。
 """
 function forward_G(inp, theta; N, seed)
-    ccfg, recs, cfg = inp.ccfg, inp.recs, inp.cfg
+    ccfg, recs, cfg, window = inp.ccfg, inp.recs, inp.cfg, inp.window
     params = try
-        fit_exogenous(params_from_theta(ccfg.regime, theta), recs, ccfg.calib)
+        fit_exogenous(params_from_theta(ccfg.regime, theta), recs, window)
     catch                                  # De レジーム条件等の違反
         return nothing
     end
@@ -79,7 +90,8 @@ function forward_G(inp, theta; N, seed)
     # (M8_AUG_SETTINGS)を使い、較正と検証の力学を一致させる。初期アンサンブル
     # の乱数は θ_j 間で共通(seed のみに依存)にして CRN 性を保つ(呼び出し側
     # は j に依らず同一の seed = seed_it を渡す設計、上記コメント参照)。
-    aug = build_m8_augmented_params(params, inp.country)
+    aug = build_m8_augmented_params(params, inp.country;
+                                    include_theta_sig = inp.include_theta_sig)
     E0 = augment_ensemble(inp.E0, aug; rng = Xoshiro(seed))
     res = try
         run_assimilation(params, E0, recs, inp.event_times;
@@ -96,7 +108,7 @@ function forward_G(inp, theta; N, seed)
         num = Float64[]
         for r in recs
             r.spec.name === Symbol(s.var) || continue
-            ccfg.calib[1] <= r.t < ccfg.calib[2] || continue
+            window[1] <= r.t < window[2] || continue
             k = clamp(searchsortedlast(res.t, r.t), 1, length(res.t))
             m = mean(r.spec.h(view(res.X, 1:N_STATE, k, j)) for j in 1:N)
             push!(num, (r.value - m) / r.spec.sd)
@@ -111,7 +123,7 @@ function forward_G(inp, theta; N, seed)
     for (k, c) in enumerate(obs_counts)
         c >= 0 || continue
         lo = cfg.t0 + (k - 1) * w
-        ccfg.calib[1] <= lo < ccfg.calib[2] || continue
+        window[1] <= lo < window[2] || continue
         yr = floor(Int, lo)
         Ny[yr] = get(Ny, yr, 0) + c
         acc = 0.0
@@ -149,26 +161,46 @@ end
 
 using LinearAlgebra: I
 
+"""
+    calibrate(country; J, iters, N, seed, window, prior_center, prior_sd, save) -> (; theta_hat, nu_star, out)
+
+EKI 較正(DECISIONS #0030-5/-6/-31)。`window` 省略時は国既定の較正窓
+(M8 の従来動作)。M9(#0052)の expanding walk-forward では:
+
+- `window = (窓開始, オリジン t_k)` を渡し、オリジン以前のデータのみで較正。
+- `prior_center`: 初回オリジンは `nothing`(既定値からモーメント初期化、
+  従来動作と同じ)。以後のオリジンは前オリジンの較正値の Dict
+  (`CAL_PARAMS` の名前をキーとする)を渡して warm-start する。
+- `prior_sd`: 変換空間の事前 sd。毎オリジンとも既定値 0.5 に復元する
+  (#0052 の「prior sd は毎回初期値に復元」)。
+- `save`: `true`(既定)なら結果を `output/M8_calib_<country>.json` に保存
+  (M8 CLI の従来動作)。M9 は複数オリジンで上書きされるのを避けるため
+  `false` を渡し、戻り値の `theta_hat`/`nu_star` を直接使う。
+"""
 function calibrate(country::String; J::Int = 16, iters::Int = 3, N::Int = 50,
-                   seed::Integer = 20260710)
+                   seed::Integer = 20260710,
+                   window = COUNTRY_CFG[country].calib,
+                   prior_center::Union{Nothing,Dict} = nothing,
+                   prior_sd::Float64 = 0.5,
+                   save::Bool = true,
+                   include_theta_sig::Bool = country != "JPN")
     ccfg = COUNTRY_CFG[country]
     rng = Xoshiro(seed)
     params0 = build_params(ccfg.regime)
-    recs0 = build_observations(country, params0; t1 = ccfg.calib[2])
-    cfg0 = AssimConfig(t0 = 0.0, t1 = ccfg.calib[2])
-    center = Dict(
+    recs0 = build_observations(country, params0; t1 = window[2])
+    cfg0 = AssimConfig(t0 = 0.0, t1 = window[2])
+    center = prior_center !== nothing ? prior_center : Dict(
         :eta_g => params0.l2.eta_g, :delta_sig => params0.l2.delta_sig,
         :lam0 => params0.l2.lam0, :mu_gbar => params0.l2.mu_gbar,
-        :mu_p => params0.l2.mu_p, :c_v0 => init_c_v0(recs0, ccfg.calib),
-        :nu => init_nu(build_obs_counts(country, cfg0), cfg0, params0, ccfg.calib))
+        :mu_p => params0.l2.mu_p, :c_v0 => init_c_v0(recs0, window))
     theta0 = [center[p.name] for p in CAL_PARAMS]
     eta0 = to_eta(theta0)
-    # 事前: 変換空間で sd 0.5(§8.2 の LogNormal(·, 0.5) と同型)。
-    # mu_* / c_v0 は logit/log 空間の値なので加法 0.5。
-    H = eta0 .+ 0.5 .* randn(rng, length(eta0), J)
-    println("== $country EKI 較正: J=$J iters=$iters N=$N ==")
+    # 事前: 変換空間で sd `prior_sd`(既定 0.5。§8.2 の LogNormal(·, 0.5) と
+    # 同型)。mu_* / c_v0 は logit/log 空間の値なので加法。
+    H = eta0 .+ prior_sd .* randn(rng, length(eta0), J)
+    println("== $country EKI 較正: J=$J iters=$iters N=$N window=$window ==")
     println("  初期中心 θ = ", round.(theta0, digits = 3))
-    inp = calib_inputs(country; N, seed)
+    inp = calib_inputs(country; N, seed, window, include_theta_sig)
     nu_star = inp.nu0
     for it in 1:iters
         Gcols = Vector{Any}(undef, J)
@@ -206,14 +238,16 @@ function calibrate(country::String; J::Int = 16, iters::Int = 3, N::Int = 50,
             Dict("nu" => nu_star)),
         "ensemble_final" => [from_eta(H[:, j]) for j in 1:J],
         "J" => J, "iters" => iters, "N" => N, "seed" => seed,
-        "calib_window" => collect(ccfg.calib),
+        "calib_window" => collect(window),
         "commit" => strip(read(`git -C $(dirname(@__DIR__)) rev-parse HEAD`, String)),
         "generated_at" => Dates.format(now(), dateformat"yyyy-mm-ddTHH:MM:SS"))
-    path = joinpath(@__DIR__, "output", "M8_calib_$(country).json")
-    mkpath(dirname(path))
-    write(path, JSON3.write(out))
-    println("  保存: $path")
-    return theta_hat
+    if save
+        path = joinpath(@__DIR__, "output", "M8_calib_$(country).json")
+        mkpath(dirname(path))
+        write(path, JSON3.write(out))
+        println("  保存: $path")
+    end
+    return (; theta_hat, nu_star, out)
 end
 
 if abspath(PROGRAM_FILE) == (@__FILE__)

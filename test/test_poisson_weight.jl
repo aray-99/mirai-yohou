@@ -34,6 +34,202 @@
         end
     end
 
+    @testset "NegBin 尤度オプション (#0054)" begin
+        # 既知パラメータでの log pmf(Γ 関数を使わない初等的同一性で検証):
+        # P(0|mu,r) = (r/(r+mu))^r、P(N+1)/P(N) = (N+r)/(N+1) · mu/(r+mu)
+        for (mu, r) in ((2.0, 5.0), (1.5, 0.7), (8.0, 2.0))
+            @test negbin_logpmf(0, mu, r) ≈ r * log(r / (r + mu)) rtol = 1e-10
+            for N_obs in 0:10
+                ratio = log((N_obs + r) / (N_obs + 1) * mu / (r + mu))
+                @test negbin_logpmf(N_obs + 1, mu, r) - negbin_logpmf(N_obs, mu, r) ≈
+                      ratio atol = 1e-9
+            end
+            # 正規化: Σ_N P(N) = 1(裾は幾何減衰なので有限和で十分)
+            @test sum(exp(negbin_logpmf(N_obs, mu, r)) for N_obs in 0:2000) ≈ 1.0 rtol = 1e-6
+        end
+
+        # r → ∞ でポアソンに収束
+        @test negbin_logpmf(4, 3.0, 1e8) ≈ poisson_logpmf(4, 3.0) atol = 1e-5
+
+        # poisson_logpmf は poisson_logweights + log N! 定数
+        @test poisson_logpmf(4, 3.0) ≈
+              poisson_logweights(4, [3.0])[1] - log(factorial(4)) rtol = 1e-12
+
+        # 重みの正規化: 定数項はキャンセルし、メンバー間比だけが残る
+        mus = [1.0, 2.0, 4.0]
+        w = normalize_weights(negbin_logweights(3, mus, 5.0))
+        raw = [exp(negbin_logpmf(3, mu, 5.0)) for mu in mus]
+        @test w ≈ raw ./ sum(raw) rtol = 1e-10
+        @test sum(w) ≈ 1.0
+
+        # プロファイル MLE の回復: 既知 r から生成したカウントで r̂ ≈ r
+        rng = Xoshiro(3054)
+        r_true = 3.0
+        mus_sim = 2.0 .+ 8.0 .* rand(rng, 400)
+        counts = [rand(rng, MiraiYohou.NegativeBinomial(r_true, r_true / (r_true + mu)))
+                  for mu in mus_sim]
+        r_hat = negbin_profile_r(counts, mus_sim)
+        @test 0.5 * r_true < r_hat < 2.0 * r_true
+
+        # ポアソン生成データでは r̂ が大きく(過分散なし)、その NegBin は
+        # 実質ポアソン(有限標本の揺らぎで r̂ は有限になりうるため、pmf の
+        # 近さで判定する)
+        counts_p = [rand(rng, MiraiYohou.Poisson(mu)) for mu in mus_sim]
+        r_hat_p = negbin_profile_r(counts_p, mus_sim)
+        @test r_hat_p > 10 * r_true
+        @test abs(negbin_logpmf(5, 5.0, r_hat_p) - poisson_logpmf(5, 5.0)) < 0.05
+
+        # 入力検証
+        @test_throws DimensionMismatch negbin_profile_r([1, 2], [1.0])
+        @test_throws ArgumentError negbin_profile_r(Int[], Float64[])
+    end
+
+    @testset "run_assimilation の count_model 切り替え (#0054)" begin
+        params = build_params(:volatile)
+        t1 = 2.0
+        truth = simulate_sde(params; seed = 5401, t1 = t1)
+        event_times = [e.t for e in truth.jumps]
+        obs = synthesize_observations(truth.traj, standard_observations(params);
+                                      rng = Xoshiro(5402))
+        N = 30
+        E0 = params.x0 .+ 0.3 .* randn(Xoshiro(5403), MiraiYohou.N_STATE, N)
+        postprocess_analysis!(E0)
+        cfg = AssimConfig(t1 = t1)
+        nwin = round(Int, t1 / cfg.event_window)
+
+        # 既定(:poisson)は従来動作 + 診断フィールドが窓数分埋まる
+        r1 = run_assimilation(params, copy(E0), obs, event_times;
+                              cfg, seed = 5404)
+        @test length(r1.count_observed) == nwin
+        @test length(r1.count_logscore) == nwin
+        @test all(r1.count_observed .>= 0)          # カタログ集計は常にデータあり
+        @test all(isfinite, r1.count_logscore)
+        @test all(r1.count_logscore .<= 0)          # log pmf ≤ 0
+
+        # :negbin(大 r)は :poisson と実質同一の重み → 軌道もほぼ同一
+        # (完全一致は乱数消費順序が同じことに依存。ここでは同一シードで
+        #  X が一致することを確認する — 重み計算は乱数を消費しない)
+        r2 = run_assimilation(params, copy(E0), obs, event_times;
+                              cfg, seed = 5404,
+                              count_model = :negbin, count_dispersion = 1e10)
+        @test r2.X ≈ r1.X rtol = 1e-6
+
+        # 小さい r(強い過分散許容)では重みが均され、ESS が下がらない方向
+        r3 = run_assimilation(params, copy(E0), obs, event_times;
+                              cfg, seed = 5404,
+                              count_model = :negbin, count_dispersion = 0.5)
+        @test length(r3.ess) == nwin
+        @test all(isfinite, r3.count_logscore)
+
+        # 不正な指定はエラー
+        @test_throws ArgumentError run_assimilation(params, copy(E0), obs,
+                                                    event_times; cfg, seed = 5404,
+                                                    count_model = :negbin)
+        @test_throws ArgumentError run_assimilation(params, copy(E0), obs,
+                                                    event_times; cfg, seed = 5404,
+                                                    count_model = :bogus)
+    end
+
+    @testset "Liu-West rejuvenation (#0057)" begin
+        @testset "weighted_mean_std" begin
+            E = [1.0 2.0 3.0; 10.0 20.0 30.0]
+            w = [0.5, 0.25, 0.25]
+            xbar, sigma = MiraiYohou.weighted_mean_std(E, w)
+            @test xbar ≈ [0.5*1 + 0.25*2 + 0.25*3, 0.5*10 + 0.25*20 + 0.25*30]
+            expected_var1 = 0.5*(1-xbar[1])^2 + 0.25*(2-xbar[1])^2 + 0.25*(3-xbar[1])^2
+            @test sigma[1] ≈ sqrt(expected_var1)
+            # 定数行(分散ゼロ)は sigma = 0
+            Econst = [5.0 5.0 5.0]
+            _, sigma_c = MiraiYohou.weighted_mean_std(Econst, [1/3, 1/3, 1/3])
+            @test sigma_c[1] ≈ 0.0 atol = 1e-12
+        end
+
+        @testset "liu_west_rejuvenate!: a=1 は不変" begin
+            rng = Xoshiro(41)
+            E = randn(rng, 3, 20)
+            E0 = copy(E)
+            xbar, sigma = MiraiYohou.weighted_mean_std(E, fill(1/20, 20))
+            MiraiYohou.liu_west_rejuvenate!(E, xbar, sigma, 1.0, rng)
+            @test E ≈ E0   # b=√(1-1²)=0 → ジッタなし、xbar項も a=1 で無効
+        end
+
+        @testset "liu_west_rejuvenate!: モーメント近似保存(a<1)" begin
+            rng = Xoshiro(42)
+            n, N = 4, 20000
+            E = randn(rng, n, N)   # 平均0・分散1のi.i.d.列(等重み想定)
+            w = fill(1.0 / N, N)
+            xbar, sigma = MiraiYohou.weighted_mean_std(E, w)
+            a = 0.9
+            MiraiYohou.liu_west_rejuvenate!(E, xbar, sigma, a, rng)
+            _mean(v) = sum(v) / length(v)
+            _std(v) = (m = _mean(v); sqrt(sum(abs2, v .- m) / (length(v) - 1)))
+            # 1次モーメント: 平均は保存されるはず(理論上 xbar 自身に収束)
+            for k in 1:n
+                @test isapprox(_mean(E[k, :]), xbar[k]; atol = 0.05)
+                # 2次モーメント: a²σ² + (1-a²)σ² = σ²(縮小核は分散を保存)
+                @test isapprox(_std(E[k, :]), sigma[k]; rtol = 0.05)
+            end
+        end
+
+        @testset "sigma=0 の座標はジッタしない" begin
+            rng = Xoshiro(43)
+            n, N = 2, 10
+            E = zeros(n, N)
+            E[1, :] .= 3.0                 # 定数行(sigma=0)
+            E[2, :] .= randn(rng, N)
+            xbar = [3.0, 0.0]
+            sigma = [0.0, 1.0]
+            a = 0.9
+            E_before_row1 = copy(E[1, :])
+            MiraiYohou.liu_west_rejuvenate!(E, xbar, sigma, a, rng)
+            # row 1: a*3 + (1-a)*3 + 0 = 3(不変)
+            @test E[1, :] ≈ E_before_row1
+        end
+
+        @testset "run_assimilation: rejuvenation_a=1.0 は従来動作とビット一致" begin
+            params = build_params(:volatile)
+            t1 = 2.0
+            truth = simulate_sde(params; seed = 5501, t1 = t1)
+            event_times = [e.t for e in truth.jumps]
+            obs = synthesize_observations(truth.traj, standard_observations(params);
+                                          rng = Xoshiro(5502))
+            N = 30
+            E0 = params.x0 .+ 0.3 .* randn(Xoshiro(5503), MiraiYohou.N_STATE, N)
+            postprocess_analysis!(E0)
+            cfg_legacy = AssimConfig(t1 = t1)
+            cfg_explicit = AssimConfig(t1 = t1, rejuvenation_a = 1.0)
+            r_legacy = run_assimilation(params, copy(E0), obs, event_times;
+                                       cfg = cfg_legacy, seed = 5504)
+            r_explicit = run_assimilation(params, copy(E0), obs, event_times;
+                                         cfg = cfg_explicit, seed = 5504)
+            @test r_legacy.X == r_explicit.X
+            @test r_legacy.nresample == r_explicit.nresample
+            @test r_legacy.ess == r_explicit.ess
+        end
+
+        @testset "run_assimilation: rejuvenation_a<1 は再抽選後にスプレッドを回復する" begin
+            params = build_params(:volatile)
+            t1 = 2.0
+            truth = simulate_sde(params; seed = 5601, t1 = t1)
+            event_times = [e.t for e in truth.jumps]
+            obs = synthesize_observations(truth.traj, standard_observations(params);
+                                          rng = Xoshiro(5602))
+            N = 30
+            E0 = params.x0 .+ 0.3 .* randn(Xoshiro(5603), MiraiYohou.N_STATE, N)
+            postprocess_analysis!(E0)
+            cfg_none = AssimConfig(t1 = t1)
+            cfg_rej = AssimConfig(t1 = t1, rejuvenation_a = 0.9)
+            r_none = run_assimilation(params, copy(E0), obs, event_times;
+                                     cfg = cfg_none, seed = 5604)
+            r_rej = run_assimilation(params, copy(E0), obs, event_times;
+                                    cfg = cfg_rej, seed = 5604)
+            @test r_none.nresample == r_rej.nresample   # 再抽選判定自体は不変
+            if r_none.nresample > 0
+                @test r_rej.X != r_none.X   # 若返りが軌道に反映されている
+            end
+        end
+    end
+
     @testset "resample_if_needed!" begin
         rng = Xoshiro(21)
         # 均等な Λ → ESS = N → リサンプリングなし

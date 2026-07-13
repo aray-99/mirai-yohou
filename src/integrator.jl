@@ -57,7 +57,7 @@ const XI_SIG_FLOOR = -12.0
 
 # 格子区間 [t, t+dt) の内生ジャンプ(Ogata thinning、§10 擬似コード)。
 # 受理のたびに Γ を適用し、以後の候補は更新後の状態で評価する。
-function _jumps_in_interval!(xi::Vector{Float64}, t::Float64, t_next::Float64,
+function _jumps_in_interval!(xi::AbstractVector{Float64}, t::Float64, t_next::Float64,
                              params::ModelParameters, rng::AbstractRNG,
                              jumps::Vector{JumpEvent})
     lam_bar = params.l2.lam_bar

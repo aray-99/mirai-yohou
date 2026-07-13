@@ -13,6 +13,109 @@ poisson_logweights(N_obs::Integer, Lambdas::AbstractVector{<:Real}) =
     [N_obs * log(L) - L for L in Lambdas]
 
 """
+    poisson_logpmf(N_obs, mu) -> Float64
+
+素のポアソン log pmf(log N! 定数込み。予測 log スコア用 — 重み計算には
+定数省略版の `poisson_logweights` を使う)。
+"""
+poisson_logpmf(N_obs::Integer, mu::Real) =
+    logpdf(Poisson(max(float(mu), 1e-10)), N_obs)
+
+"""
+    negbin_logpmf(N_obs, mu, r) -> Float64
+
+負の二項分布の log pmf(DECISIONS #0054)。平均 `mu`、サイズ(分散)
+パラメータ `r` の (mu, r) パラメタライズ: Var = mu + mu²/r。
+`r → ∞` でポアソンに収束する。Distributions の NegativeBinomial(r, p)
+(p = r/(r+mu))に委譲。
+"""
+negbin_logpmf(N_obs::Integer, mu::Real, r::Real) =
+    logpdf(NegativeBinomial(float(r), float(r) / (float(r) + max(float(mu), 1e-10))),
+           N_obs)
+
+"""
+    negbin_logweights(N_obs, mus, r) -> Vector{Float64}
+
+NegBin 尤度のメンバー別 log 重み(#0054)。r・N_obs はメンバー共通なので
+定数項は省略可能だが、log スコアとの一貫性のため完全な log pmf を返す
+(重みの正規化には影響しない)。
+"""
+negbin_logweights(N_obs::Integer, mus::AbstractVector{<:Real}, r::Real) =
+    [negbin_logpmf(N_obs, mu, r) for mu in mus]
+
+"""
+    negbin_profile_r(counts, mus; lo=1e-2, hi=1e4, iters=200) -> Float64
+
+サイズパラメータ r のプロファイル最尤(#0054): 平均列 `mus`(= ν·Λ_w、
+較正窓のみ)を固定して Σ_w log NegBin(N_w | mu_w, r) を r について最大化
+する。log r 空間の黄金分割探索(単峰。境界解 hi 到達 ≈ ポアソンで十分の
+サイン)。ν は現行どおり別途プロファイル(ν* = ΣN/ΣΛ、#0031-1/#0033)し、
+本関数では動かさない。
+"""
+function negbin_profile_r(counts::AbstractVector{<:Integer},
+                          mus::AbstractVector{<:Real};
+                          lo::Float64 = 1e-2, hi::Float64 = 1e4, iters::Int = 200)
+    length(counts) == length(mus) ||
+        throw(DimensionMismatch("counts and mus must have equal length"))
+    isempty(counts) && throw(ArgumentError("no count windows to profile r"))
+    ll(logr) = sum(negbin_logpmf(c, mu, exp(logr)) for (c, mu) in zip(counts, mus))
+    a, b = log(lo), log(hi)
+    phi = (sqrt(5.0) - 1) / 2
+    c = b - phi * (b - a); d = a + phi * (b - a)
+    fc, fd = ll(c), ll(d)
+    for _ in 1:iters
+        if fc > fd
+            b, d, fd = d, c, fc
+            c = b - phi * (b - a); fc = ll(c)
+        else
+            a, c, fc = c, d, fd
+            d = a + phi * (b - a); fd = ll(d)
+        end
+        (b - a) < 1e-8 && break
+    end
+    return exp((a + b) / 2)
+end
+
+"""
+    profile_count_dispersion(counts, lambdas) -> (; nu_star, r_hat)
+
+カウント観測モデルの (ν, r) プロファイル(#0031-1/#0054): 窓別カウント
+`counts` とモデル強度積分 `lambdas`(同一窓、ν 適用前)から、
+ν* = ΣN / ΣΛ(ポアソン最尤、下限 1.0 — #0031-1)を先に解き、
+平均 ν*·Λ_w を固定して r̂ を `negbin_profile_r` で1次元最尤する。
+M9 walk-forward のオリジン別プロファイル(窓開始〜t_k のデータのみ)用。
+"""
+function profile_count_dispersion(counts::AbstractVector{<:Integer},
+                                  lambdas::AbstractVector{<:Real})
+    length(counts) == length(lambdas) ||
+        throw(DimensionMismatch("counts and lambdas must have equal length"))
+    isempty(counts) && throw(ArgumentError("no count windows to profile"))
+    nu_star = max(sum(counts) / max(sum(lambdas), 1e-8), 1.0)
+    r_hat = negbin_profile_r(counts, nu_star .* lambdas)
+    return (; nu_star, r_hat)
+end
+
+"""
+    windowed_count_total(obs_counts, t0, event_window, window) -> Int
+
+週次カウント列 `obs_counts`(窓 k は [t0+(k−1)·event_window, t0+k·event_window)、
+負値 = データなし #0031-3)のうち、窓開始が `window = (lo, hi)` に入る
+データあり窓のカウント合計。theta_sig 拡大の適用規則(#0052/#0054:
+較正窓のフィルタ後週次カウント合計によるデータ規則)などの情報量判定に使う。
+"""
+function windowed_count_total(obs_counts::AbstractVector{<:Integer}, t0::Real,
+                              event_window::Real, window)
+    tot = 0
+    for (k, c) in enumerate(obs_counts)
+        c >= 0 || continue
+        lo = t0 + (k - 1) * event_window
+        window[1] <= lo < window[2] || continue
+        tot += c
+    end
+    return tot
+end
+
+"""
     normalize_weights(logw) -> Vector{Float64}
 
 log-sum-exp で正規化した重み(Σ w = 1)。

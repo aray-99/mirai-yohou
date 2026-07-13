@@ -59,10 +59,12 @@ export standard_observations, observation_times, synthesize_observations
 export enkf_analysis!, enks_analysis!, postprocess_analysis!, rtps!, ensemble_spread
 export poisson_logweights, normalize_weights, ess, systematic_resample,
        resample_if_needed!
+export poisson_logpmf, negbin_logpmf, negbin_logweights, negbin_profile_r,
+       profile_count_dispersion, windowed_count_total
 
 # assimilation driver (§9.2/§9.3/§13)
 export AssimConfig, AssimResult, run_assimilation, free_ensemble, with_theta_sig
-export AugmentedParam, augment_ensemble, build_member_params
+export AugmentedParam, augment_ensemble, build_member_params, simulate_sde_augmented
 
 # Phase B (§10)
 export simulate_sde_phaseb, drift_jacobian_sparsity

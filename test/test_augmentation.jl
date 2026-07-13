@@ -186,6 +186,63 @@ _std(v) = sqrt(sum(abs2, v .- _mean(v)) / (length(v) - 1))
         end
     end
 
+    @testset "simulate_sde_augmented: 拡大込み前進(#0053)" begin
+        params = build_params(:volatile)
+        t1 = 2.0
+
+        # (i) 空リストは simulate_sde(既定 EndogenousHawkes)と同一軌道
+        ref = simulate_sde(params; seed = 501, t1 = t1)
+        r0 = simulate_sde_augmented(params, AugmentedParam[];
+                                    seed = 501, t1 = t1, xi0 = params.x0)
+        @test r0.X == ref.traj.X
+        @test r0.t == ref.traj.t
+        @test length(r0.jumps) == length(ref.jumps)
+
+        # (ii) 行数チェック: xi0 の長さ不一致は DimensionMismatch
+        aug = [AugmentedParam(name = :netgrowth, link = :identity,
+                              init = params.exo.netgrowth, rw_sd = 0.02),
+               AugmentedParam(name = :a_T, link = :log,
+                              init = params.l2.a_T, rw_sd = 0.1)]
+        @test_throws DimensionMismatch simulate_sde_augmented(params, aug;
+                                                              seed = 502, t1 = t1,
+                                                              xi0 = params.x0)
+
+        # (iii) rw_sd = 0 なら拡大行は全期間一定(RW ノイズなし)
+        aug0 = [AugmentedParam(name = :netgrowth, link = :identity, rw_sd = 0.0),
+                AugmentedParam(name = :a_T, link = :log, rw_sd = 0.0)]
+        xi0 = vcat(params.x0, [-0.015, log(0.05)])
+        rc = simulate_sde_augmented(params, aug0; seed = 503, t1 = t1, xi0)
+        @test size(rc.X, 1) == N_STATE + 2
+        @test all(rc.X[N_STATE + 1, :] .== -0.015)
+        @test all(rc.X[N_STATE + 2, :] .== log(0.05))
+
+        # (iv) rw_sd > 0 なら拡大行が実際に RW 拡散する
+        rw = simulate_sde_augmented(params, aug; seed = 504, t1 = t1,
+                                    xi0 = vcat(params.x0,
+                                               [params.exo.netgrowth,
+                                                log(params.l2.a_T)]))
+        @test _std(rw.X[N_STATE + 1, :]) > 0
+        @test _std(rw.X[N_STATE + 2, :]) > 0
+
+        # (v) シード再現性
+        rw2 = simulate_sde_augmented(params, aug; seed = 504, t1 = t1,
+                                     xi0 = vcat(params.x0,
+                                                [params.exo.netgrowth,
+                                                 log(params.l2.a_T)]))
+        @test rw.X == rw2.X
+
+        # (vi) 拡大値が力学に効く: netgrowth(identity)の初期値を大きく変える
+        # と P(IX_P)の軌道が変わる(rw_sd=0 で決定的に注入・同一シード)
+        xa = vcat(params.x0, [0.05, log(params.l2.a_T)])
+        xb = vcat(params.x0, [-0.05, log(params.l2.a_T)])
+        aug_fix = [AugmentedParam(name = :netgrowth, link = :identity, rw_sd = 0.0),
+                   AugmentedParam(name = :a_T, link = :log, rw_sd = 0.0)]
+        ra = simulate_sde_augmented(params, aug_fix; seed = 505, t1 = t1, xi0 = xa)
+        rb = simulate_sde_augmented(params, aug_fix; seed = 505, t1 = t1, xi0 = xb)
+        @test ra.X[IX_P, end] != rb.X[IX_P, end]
+        @test ra.X[IX_P, end] > rb.X[IX_P, end]   # 高い純増加率 → 大きい log P
+    end
+
     @testset "スプレッド床・マスキングとの共存(拡大行は非対象のまま)" begin
         N = 2000
         rng = Xoshiro(11)

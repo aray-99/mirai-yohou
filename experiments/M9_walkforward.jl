@@ -159,7 +159,7 @@ end
 
 """
     run_origin(country, t_k, prior_center; N, seed, J, iters, N_eki,
-               include_theta_sig) -> NamedTuple
+               include_theta_sig, prior_sd_override = nothing) -> NamedTuple
 
 1オリジン分の (較正 → 同化 → 予報 → 自由ラン → 評価)。戻り値に次オリジンへ
 の warm-start 用 `theta_center`(Dict)と評価指標一式を含む。
@@ -174,7 +174,8 @@ M9_negbin_eval.jl と同じ手続き)。その (ν*, r̂) で本同化ラン
 function run_origin(country::String, t_k::Real,
                     prior_center::Union{Nothing,Dict};
                     N::Int, seed::Integer, J::Int, iters::Int, N_eki::Int,
-                    include_theta_sig::Bool)
+                    include_theta_sig::Bool,
+                    prior_sd_override::Union{Nothing,AbstractDict} = nothing)
     ccfg = COUNTRY_CFG[country]
     win_start = ccfg.calib[1]
     window = (win_start, Float64(t_k))
@@ -184,10 +185,12 @@ function run_origin(country::String, t_k::Real,
     println("-- $country origin t=$(t_k) (calib window $window, eval $eval_win) --")
 
     # (a) EKI 再較正(expanding window, warm-start, prior sd 復元)。
-    # ミスフィット定義は M8 手続きのまま(#0054: EKI 内部は変更しない)
+    # ミスフィット定義は M8 手続きのまま(#0054: EKI 内部は変更しない)。
+    # `prior_sd_override` は既定 nothing(M9 の従来動作を変えない後方互換)、
+    # M10(#0062)は mu_gbar のみ独立 sd を渡す。
     calib = calibrate(country; J, iters, N = N_eki, seed = seed + 101,
-                      window, prior_center, prior_sd = 0.5, save = false,
-                      include_theta_sig)
+                      window, prior_center, prior_sd = 0.5, prior_sd_override,
+                      save = false, include_theta_sig)
     theta_hat, nu_eki = calib.theta_hat, calib.nu_star
     theta_center = Dict(CAL_PARAMS[k].name => theta_hat[k] for k in eachindex(CAL_PARAMS))
     kw = theta_center
@@ -346,6 +349,25 @@ function run_walkforward(country::String; N::Int = 100, seed::Integer = 20260711
     end
     elapsed = time() - t_start
 
+    return build_walkforward_output(country, orig_list, origin_results, smoke, seed,
+                                    elapsed)
+end
+
+"""
+    build_walkforward_output(country, orig_list, origin_results, smoke, seed, elapsed;
+                             design_decision = "#0052", extra_provenance = Dict()) -> Dict
+
+`run_origin` の戻り値列(`origin_results`)からプール判定値・診断・来歴を
+組み立てる(JSON 化前の中間形)。M9(`run_walkforward`)・M10
+(`M10_walkforward.jl` の `run_walkforward_m10`)で共通利用する(#0062、
+プール集計・判定基準は #0052 と同一のため重複実装を避ける)。
+`extra_provenance` は `provenance` に merge される追加フィールド(M10 の
+prior 規則の記録などに使う)。
+"""
+function build_walkforward_output(country::String, orig_list, origin_results, smoke::Bool,
+                                  seed::Integer, elapsed::Float64;
+                                  design_decision::String = "#0052",
+                                  extra_provenance::AbstractDict = Dict())
     # プール集計(#0052: 全オリジンをプールした国別判定値)
     hit_f = sum(r.cov_fore.hit for r in origin_results)
     n_f = sum(r.cov_fore.n for r in origin_results)
@@ -450,12 +472,12 @@ function run_walkforward(country::String; N::Int = 100, seed::Integer = 20260711
             "resample" => r.resample, "ess_range" => collect(r.ess))
             for r in origin_results],
         "elapsed_sec" => elapsed,
-        "provenance" => Dict(
+        "provenance" => merge(Dict(
             "commit" => strip(read(`git -C $(dirname(@__DIR__)) rev-parse HEAD`, String)),
             "seed" => seed,
             "generated_at" => Dates.format(now(), dateformat"yyyy-mm-ddTHH:MM:SS"),
             "frozen_decisions" => frozen_decisions_string(),
-            "design_decision" => "#0052"))
+            "design_decision" => design_decision), extra_provenance))
 end
 
 function parse_origins(spec::AbstractString)

@@ -230,6 +230,69 @@
         end
     end
 
+    @testset "g 計装診断 instrument_g (#0065)" begin
+        # 標準観測(twin)に :g_swiid 年次観測を1本だけ追加した簡易シナリオ。
+        # 実データ層(build_observations.jl)を経由せず、ObservationSpec/
+        # ObservationRecord を直接組み立てる(パッケージテストは experiments
+        # 側のデータファイルに依存させない、test_augmentation.jl と同じ流儀)。
+        params = build_params(:volatile)
+        t1 = 3.0
+        truth = simulate_sde(params; seed = 7101, t1 = t1)
+        event_times = [e.t for e in truth.jumps]
+        obs = synthesize_observations(truth.traj, standard_observations(params);
+                                      rng = Xoshiro(7102))
+        g_swiid_spec = ObservationSpec(:g_swiid, 1.0, 0.05, xi -> xi[IX_G], IX_G)
+        g_swiid_obs = ObservationRecord(2.0, g_swiid_spec, 0.3)
+        obs_all = sort(vcat(obs, [g_swiid_obs]); by = o -> o.t)
+        N = 30
+        E0 = params.x0 .+ 0.3 .* randn(Xoshiro(7103), N_STATE, N)
+        postprocess_analysis!(E0)
+        cfg = AssimConfig(t1 = t1)
+        seed = 7104
+
+        r_off = run_assimilation(params, copy(E0), obs_all, event_times; cfg, seed)
+        r_on = run_assimilation(params, copy(E0), obs_all, event_times; cfg, seed,
+                                instrument_g = true)
+
+        # 判定数値へ影響ゼロ(絶対条件、#0065): 既定無効時と有効時で
+        # g_diag 以外の全フィールドがビット一致する。
+        @test r_off.X == r_on.X
+        @test r_off.ranks == r_on.ranks
+        @test r_off.ess == r_on.ess
+        @test r_off.nresample == r_on.nresample
+        @test r_off.ts_snap == r_on.ts_snap
+        @test r_off.Xs == r_on.Xs
+        @test r_off.count_observed == r_on.count_observed
+        @test isequal(r_off.count_logscore, r_on.count_logscore)   # NaN 対応
+
+        # 既定無効時は計装ログが空(計算自体を行わない)
+        @test isempty(r_off.g_diag)
+
+        # 有効時はログが記録され、週次カウント更新と観測解析の両方を含む
+        @test !isempty(r_on.g_diag)
+        types = Set(d["update_type"] for d in r_on.g_diag)
+        @test "count_weekly" in types
+        @test "g_swiid_annual" in types
+        # pre/post が対で記録される
+        @test count(d -> d["phase"] == "pre", r_on.g_diag) ==
+              count(d -> d["phase"] == "post", r_on.g_diag)
+        # g_swiid_annual の解析後、以降のログの last_g_swiid_obs が観測値に更新される
+        idx_g = findfirst(d -> d["update_type"] == "g_swiid_annual" && d["phase"] == "post",
+                          r_on.g_diag)
+        @test idx_g !== nothing
+        @test r_on.g_diag[idx_g]["last_g_swiid_obs"] ≈ 0.3
+        for d in r_on.g_diag[(idx_g + 1):end]
+            @test d["last_g_swiid_obs"] ≈ 0.3
+        end
+        # 解析前は g_swiid 未観測(nothing)
+        @test r_on.g_diag[1]["last_g_swiid_obs"] === nothing
+        # g_mean/g_sd は有限な実数(病的値でない)
+        @test all(isfinite(d["g_mean"]) && isfinite(d["g_sd"]) && d["g_sd"] >= 0
+                  for d in r_on.g_diag)
+        # t は単調非減少(ログ順序が時系列どおり)
+        @test issorted(d["t"] for d in r_on.g_diag)
+    end
+
     @testset "resample_if_needed!" begin
         rng = Xoshiro(21)
         # 均等な Λ → ESS = N → リサンプリングなし

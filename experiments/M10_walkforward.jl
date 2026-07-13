@@ -21,11 +21,15 @@
 # 予報生成則は #0062 により M9(#0052/#0055/#0057)から不変で引き継ぐ。
 #
 # 実行: julia --project=experiments -t 8 experiments/M10_walkforward.jl JPN THA
-#         [--smoke] [--origins a,b] [--mu-gbar-sd 0.2]
+#         [--smoke] [--origins a,b] [--mu-gbar-sd 0.2] [--instrument-g]
 #   --smoke: 各国先頭2オリジン・N=40・EKI J=12/iters=2 の動作確認モード。
 #   --mu-gbar-sd: mu_gbar アンカリング prior の sd(変換空間、恒等なので
 #     logit 座標の sd と同義)。既定 0.2(仮。#0062 の事前選定プロトコル
 #     M10_prior_select.jl の結果を見て設定凍結で確定)。
+#   --instrument-g: g 計装診断(DECISIONS #0065)を有効化する。オリジンごとに
+#     アンサンブル g(IX_G)の平均・sd を各解析/再重み付けステップの前後で
+#     読み取り専用記録し、M10_instrument_g_<country>_t<t_k>[_smoke].json へ
+#     保存する。既定無効(乱数消費・状態・重みへの副作用なし、判定数値不変)。
 
 include(joinpath(@__DIR__, "M9_walkforward.jl"))   # M8_calibrate.jl 等も連鎖 include 済み
 
@@ -51,20 +55,54 @@ function gbar_anchor(country::String, window)
 end
 
 """
+    write_g_diag(country, t_k, r, smoke, seed) -> String
+
+g 計装診断(DECISIONS #0065)を1オリジン分 JSON へ保存する(オリジン別)。
+`r.g_diag`(`run_origin` が最終的に採用した同化ランの読み取り専用ログ)を
+来歴(コミット SHA・シード・生成日時)付きで書き出す。判定数値には一切
+関与しない診断専用の成果物。保存先パスを返す。
+"""
+function write_g_diag(country::String, t_k::Real, r, smoke::Bool, seed::Integer)
+    suffix = smoke ? "_smoke" : ""
+    path = joinpath(@__DIR__, "output", "M10_instrument_g_$(country)_t$(Int(t_k))$(suffix).json")
+    mkpath(dirname(path))
+    out = Dict(
+        "country" => country,
+        "t_k" => Float64(t_k),
+        "design_decision" => "#0065",
+        "g_diag" => r.g_diag,
+        "provenance" => Dict(
+            "commit" => strip(read(`git -C $(dirname(@__DIR__)) rev-parse HEAD`, String)),
+            "seed" => seed,
+            "generated_at" => Dates.format(now(), dateformat"yyyy-mm-ddTHH:MM:SS"),
+        ),
+    )
+    write(path, JSON3.write(out))
+    println("  保存(g 計装診断): $path")
+    return path
+end
+
+"""
     run_walkforward_m10(country; N, seed, J, iters, N_eki, smoke, origins,
-                        mu_gbar_sd) -> Dict
+                        mu_gbar_sd, instrument_g) -> Dict
 
 M9 の `run_walkforward` と同じ流れ(オリジンごとに較正 → 同化 → 予報 →
 自由ラン → 評価、プール集計)だが、prior 規則を #0062 のとおりに変更する:
 warm-start を行わず、毎オリジン `prior_center` を M8 凍結値から再構築し、
 `mu_gbar` のみ `gbar_anchor` で上書き・sd を `mu_gbar_sd` で独立指定する。
 出力 JSON にはオリジンごとのアンカリング中心・sd を追加で記録する。
+
+`instrument_g`(既定 false、DECISIONS #0065): 各オリジンの `run_origin` に
+読み取り専用の g 計装フックを伝搬し、オリジンごとに
+`M10_instrument_g_<country>_t<t_k>[_smoke].json` を書き出す。既定無効時は
+計算・出力とも一切行わない(判定数値・所要時間に影響なし)。
 """
 function run_walkforward_m10(country::String; N::Int = 100, seed::Integer = 20260711,
                              J::Int = 24, iters::Int = 4, N_eki::Int = 100,
                              smoke::Bool = false,
                              origins::Union{Nothing,Vector{Int}} = nothing,
-                             mu_gbar_sd::Float64 = 0.2)
+                             mu_gbar_sd::Float64 = 0.2,
+                             instrument_g::Bool = false)
     orig_list = origins !== nothing ? [t for t in origins if t in M9_ORIGINS[country]] :
                 copy(M9_ORIGINS[country])
     if smoke
@@ -106,7 +144,9 @@ function run_walkforward_m10(country::String; N::Int = 100, seed::Integer = 2026
                 round(anchor, digits = 3), "  sd = $mu_gbar_sd")
         r = run_origin(country, t_k, prior_center; N, seed = seed + t_k, J, iters,
                        N_eki, include_theta_sig, prior_sd_override,
-                       validate_prior = true)   # #0064: prior 妥当性リサンプリング
+                       validate_prior = true,   # #0064: prior 妥当性リサンプリング
+                       instrument_g)            # #0065: g 計装(既定 false)
+        instrument_g && write_g_diag(country, t_k, r, smoke, seed + t_k)
         push!(origin_results, r)
         # 注意: 次オリジンへの warm-start は行わない(#0062 規則2)。
         # prior_center は次のループ反復で frozen_center から再構築される。
@@ -132,6 +172,7 @@ if abspath(PROGRAM_FILE) == (@__FILE__)
     smoke = "--smoke" in ARGS
     origins = nothing
     mu_gbar_sd = 0.2
+    instrument_g = "--instrument-g" in ARGS   # #0065: 既定 false、判定数値に影響なし
     for (i, a) in enumerate(ARGS)
         a == "--origins" && (global origins = parse_origins(ARGS[i + 1]))
         a == "--mu-gbar-sd" && (global mu_gbar_sd = parse(Float64, ARGS[i + 1]))
@@ -139,7 +180,7 @@ if abspath(PROGRAM_FILE) == (@__FILE__)
     countries = [c for c in ARGS if haskey(COUNTRY_CFG, c)]
     isempty(countries) && (countries = ["JPN", "THA"])
     for c in countries
-        out = run_walkforward_m10(c; smoke, origins, mu_gbar_sd)
+        out = run_walkforward_m10(c; smoke, origins, mu_gbar_sd, instrument_g)
         suffix = smoke ? "_smoke" : ""
         path = joinpath(@__DIR__, "output", "M10_walkforward_$(c)$(suffix).json")
         mkpath(dirname(path))

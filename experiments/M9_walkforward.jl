@@ -160,7 +160,7 @@ end
 """
     run_origin(country, t_k, prior_center; N, seed, J, iters, N_eki,
                include_theta_sig, prior_sd_override = nothing,
-               validate_prior = false) -> NamedTuple
+               validate_prior = false, instrument_g = false) -> NamedTuple
 
 1オリジン分の (較正 → 同化 → 予報 → 自由ラン → 評価)。戻り値に次オリジンへ
 の warm-start 用 `theta_center`(Dict)と評価指標一式を含む。
@@ -171,13 +171,20 @@ end
 M9_negbin_eval.jl と同じ手続き)。その (ν*, r̂) で本同化ラン
 (count_model = :negbin)を実行する。カウント窓が1つも無い場合
 (JPN の t_k ≤ 28 等)は予備ランが本ランを兼ね、r = Inf(実質ポアソン)。
+
+`instrument_g`(既定 false、DECISIONS #0065): 両方の `run_assimilation`
+呼び出しに読み取り専用の g 計装フックを伝搬する。戻り値の `g_diag` は
+実際に採用された最終ラン(カウント窓ありなら NegBin 本ラン、無ければ
+予備ランがそのまま本ランを兼ねる)の `res.g_diag` を格納する。既定無効時は
+計算そのものを行わないため判定数値・乱数消費は完全に不変。
 """
 function run_origin(country::String, t_k::Real,
                     prior_center::Union{Nothing,Dict};
                     N::Int, seed::Integer, J::Int, iters::Int, N_eki::Int,
                     include_theta_sig::Bool,
                     prior_sd_override::Union{Nothing,AbstractDict} = nothing,
-                    validate_prior::Bool = false)
+                    validate_prior::Bool = false,
+                    instrument_g::Bool = false)
     ccfg = COUNTRY_CFG[country]
     win_start = ccfg.calib[1]
     window = (win_start, Float64(t_k))
@@ -223,7 +230,8 @@ function run_origin(country::String, t_k::Real,
     # 予備ラン(現行ポアソン + 1/ν): (ν*, r̂) プロファイルの Λ̄_w 供給源
     res = run_assimilation(params, E0, recs_calib, event_times;
                            cfg, seed, obs_counts, count_scale = nu_eki,
-                           count_temper = 1 / nu_eki, augmented_params = aug)
+                           count_temper = 1 / nu_eki, augmented_params = aug,
+                           instrument_g)
     ks = count_windows_in(obs_counts, cfg, window)
     if isempty(ks)
         # カウント窓なし(JPN t_k ≤ 28 等): 予備ランが本ランを兼ねる
@@ -240,7 +248,7 @@ function run_origin(country::String, t_k::Real,
         res = run_assimilation(params, E0, recs_calib, event_times;
                                cfg, seed, obs_counts, count_scale = nu_star,
                                count_model = :negbin, count_dispersion = r_hat,
-                               augmented_params = aug)
+                               augmented_params = aug, instrument_g)
     end
 
     # (c) 1年先予報アンサンブル(拡大事後値の持ち込み + RW 継続、#0053)
@@ -302,7 +310,8 @@ function run_origin(country::String, t_k::Real,
             cov_fore = (hit = hit_f, n = n_f), cov_free = (hit = hit_r, n = n_r),
             var_diag_fore, var_diag_free,
             err_fore, err_free, ll_fore, ll_free, nwin = nwin_fore,
-            resample = res.nresample, ess = extrema(res.ess))
+            resample = res.nresample, ess = extrema(res.ess),
+            g_diag = res.g_diag)   # #0065(instrument_g = false なら常に空)
 end
 
 """

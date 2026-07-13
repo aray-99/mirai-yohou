@@ -15,7 +15,7 @@ using JSON3
 using MiraiYohou
 using MiraiYohou: ObservationSpec, ObservationRecord,
                   IX_P, IX_W, IX_K, IX_G, IX_T, IX_PHI, IX_V, IX_TAU, IX_PP,
-                  logit, AugmentedParam, N_STATE
+                  logit
 
 const OBS_RAW_DIR = joinpath(@__DIR__, "raw")
 const BASE_YEAR = 1990.0                      # #0030-2
@@ -78,21 +78,13 @@ function _h_logy(params)
 end
 
 """
-    build_observations(country, params; t1, augmented_params=AugmentedParam[])
-        -> Vector{ObservationRecord}
+    build_observations(country, params; t1) -> Vector{ObservationRecord}
 
 raw/ の実データから保持座標の観測レコード列(時刻順)を構築する。
 `t1` より後(および t < 0、つまり 1990 年より前)の観測は捨てる。
 tau など任意系列はファイルがなければスキップ(警告表示)。
-
-`augmented_params` に `:obs_bias_g` を含む場合(DECISIONS #0059)、g_swiid の
-観測演算子 h を `h(x) = logit(g) + b_g`(b_g は該当拡大行、`xi` が
-`N_STATE` 行しかない場合は 0 扱い)に差し替える。他の系列は影響を受けない。
 """
-function build_observations(country::String, params; t1::Float64,
-                            augmented_params::Vector{AugmentedParam} = AugmentedParam[])
-    idx = findfirst(ap -> ap.name === :obs_bias_g, augmented_params)
-    bias_row = idx === nothing ? 0 : (N_STATE + idx)
+function build_observations(country::String, params; t1::Float64)
     records = ObservationRecord[]
     for s in REAL_SERIES
         path = _series_path(country, s.var)
@@ -124,13 +116,8 @@ function build_observations(country::String, params; t1::Float64,
                 x = s.kind === :logit_pct ? v / 100 : v
                 sd = max(sd, get(s, :sdinflate, 1.0) * _logit_sd(point_sd[y], x))
             end
-            h = if s.target === :log_y
-                _h_logy(params)
-            elseif s.var == "g_swiid" && bias_row > 0
-                (ix -> (xi -> length(xi) >= bias_row ? xi[ix] + xi[bias_row] : xi[ix]))(s.target)
-            else
+            h = s.target === :log_y ? _h_logy(params) :
                 (ix -> (xi -> xi[ix]))(s.target)
-            end
             # target_ix(DECISIONS #0043): 恒等写像の実データ観測のみ状態行を記録
             # (:log_y のような合成観測は 0 のまま = スプレッド床の対象外)。
             target_ix = s.target === :log_y ? 0 : s.target

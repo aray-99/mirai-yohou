@@ -24,7 +24,7 @@ using MiraiYohou: N_STATE, member_seed, run_assimilation, free_ensemble,
                   AssimConfig, augment_ensemble, simulate_sde,
                   simulate_sde_augmented, AugmentedParam, intensity,
                   negbin_logpmf, poisson_logpmf, profile_count_dispersion,
-                  windowed_count_total
+                  windowed_count_total, g_aug_series
 
 include(joinpath(@__DIR__, "M8_calibrate.jl"))   # M8_hindcast.jl も連鎖 include 済み
 
@@ -172,11 +172,13 @@ M9_negbin_eval.jl と同じ手続き)。その (ν*, r̂) で本同化ラン
 (count_model = :negbin)を実行する。カウント窓が1つも無い場合
 (JPN の t_k ≤ 28 等)は予備ランが本ランを兼ね、r = Inf(実質ポアソン)。
 
-`instrument_g`(既定 false、DECISIONS #0065): 両方の `run_assimilation`
-呼び出しに読み取り専用の g 計装フックを伝搬する。戻り値の `g_diag` は
-実際に採用された最終ラン(カウント窓ありなら NegBin 本ラン、無ければ
-予備ランがそのまま本ランを兼ねる)の `res.g_diag` を格納する。既定無効時は
-計算そのものを行わないため判定数値・乱数消費は完全に不変。
+`instrument_g`(既定 false、DECISIONS #0065/#0066): 両方の
+`run_assimilation` 呼び出しに読み取り専用の g 計装フックを伝搬する。戻り値の
+`g_diag` は実際に採用された最終ラン(カウント窓ありなら NegBin 本ラン、
+無ければ予備ランがそのまま本ランを兼ねる)の `res.g_diag`(#0066 により
+拡大パラメータ統計も含む)を格納する。`g_diag_fore`(#0066)は予報
+アンサンブル軌道 `fe.X` の週次刻み後処理集計(`g_aug_series`、読み取り専用)。
+既定無効時は計算そのものを行わないため判定数値・乱数消費は完全に不変。
 """
 function run_origin(country::String, t_k::Real,
                     prior_center::Union{Nothing,Dict};
@@ -306,12 +308,17 @@ function run_origin(country::String, t_k::Real,
                 "  自由 ", round(ll_free, digits = 2))
     end
 
+    # 予報窓計装(#0066): 実行済み予報軌道 fe.X(拡大行込み)の後処理集計のみ
+    # (読み取り専用・乱数消費なし)。既定無効時は計算しない。
+    g_diag_fore = instrument_g ? g_aug_series(fe.t, fe.X, aug) : Dict{String,Any}[]
+
     return (; t_k = Float64(t_k), theta_center, nu_star, r_hat,
             cov_fore = (hit = hit_f, n = n_f), cov_free = (hit = hit_r, n = n_r),
             var_diag_fore, var_diag_free,
             err_fore, err_free, ll_fore, ll_free, nwin = nwin_fore,
             resample = res.nresample, ess = extrema(res.ess),
-            g_diag = res.g_diag)   # #0065(instrument_g = false なら常に空)
+            g_diag = res.g_diag,       # #0065(instrument_g = false なら常に空)
+            g_diag_fore)               # #0066 予報窓(同上)
 end
 
 """

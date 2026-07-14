@@ -268,3 +268,41 @@ _std(v) = sqrt(sum(abs2, v .- _mean(v)) / (length(v) - 1))
         @test !(N_STATE + 1 in masked) && !(N_STATE + 2 in masked)
     end
 end
+
+@testset "simulate_sde_augmented: gamma_thinning_p 超過確率シンニング (#0068)" begin
+    params = build_params(:volatile)
+    t1 = 2.0
+    aug = AugmentedParam[]
+
+    @testset "p=1.0 は既定と bitwise 同一(乱数消費不変)" begin
+        ref = simulate_sde_augmented(params, aug; seed = 601, t1 = t1, xi0 = params.x0)
+        r1 = simulate_sde_augmented(params, aug; seed = 601, t1 = t1, xi0 = params.x0,
+                                    gamma_thinning_p = 1.0)
+        @test r1.X == ref.X
+        @test r1.t == ref.t
+        @test length(r1.jumps) == length(ref.jumps)
+        @test all(a.t == b.t && a.rho == b.rho && a.m == b.m
+                  for (a, b) in zip(r1.jumps, ref.jumps))
+    end
+
+    @testset "p=0.0 は内生ジャンプが一切発生しない" begin
+        r0 = simulate_sde_augmented(params, aug; seed = 602, t1 = t1, xi0 = params.x0,
+                                    gamma_thinning_p = 0.0)
+        @test isempty(r0.jumps)
+        # λ_e(IX_LAME)加算もなし: apply_jump! を一切呼ばないので、λ_e は
+        # ジャンプ以外の要因(drift/diffusion)でのみ変化する。既定シナリオ
+        # では IX_LAME の drift/diffusion 寄与は無いため、初期値のまま。
+        @test all(r0.X[IX_LAME, :] .== params.x0[IX_LAME])
+    end
+
+    @testset "0<p<1 でジャンプ数が単調に減る(固定シード)" begin
+        seed = 603
+        n_jumps(p) = length(simulate_sde_augmented(params, aug; seed, t1 = t1,
+                                                    xi0 = params.x0,
+                                                    gamma_thinning_p = p).jumps)
+        counts = [n_jumps(p) for p in (1.0, 0.75, 0.5, 0.25, 0.0)]
+        @test issorted(counts; rev = true)
+        @test counts[end] == 0
+        @test counts[1] > 0
+    end
+end

@@ -230,6 +230,141 @@
         end
     end
 
+    @testset "g 計装診断 instrument_g (#0065)" begin
+        # 標準観測(twin)に :g_swiid 年次観測を1本だけ追加した簡易シナリオ。
+        # 実データ層(build_observations.jl)を経由せず、ObservationSpec/
+        # ObservationRecord を直接組み立てる(パッケージテストは experiments
+        # 側のデータファイルに依存させない、test_augmentation.jl と同じ流儀)。
+        params = build_params(:volatile)
+        t1 = 3.0
+        truth = simulate_sde(params; seed = 7101, t1 = t1)
+        event_times = [e.t for e in truth.jumps]
+        obs = synthesize_observations(truth.traj, standard_observations(params);
+                                      rng = Xoshiro(7102))
+        g_swiid_spec = ObservationSpec(:g_swiid, 1.0, 0.05, xi -> xi[IX_G], IX_G)
+        g_swiid_obs = ObservationRecord(2.0, g_swiid_spec, 0.3)
+        obs_all = sort(vcat(obs, [g_swiid_obs]); by = o -> o.t)
+        N = 30
+        E0 = params.x0 .+ 0.3 .* randn(Xoshiro(7103), N_STATE, N)
+        postprocess_analysis!(E0)
+        cfg = AssimConfig(t1 = t1)
+        seed = 7104
+
+        r_off = run_assimilation(params, copy(E0), obs_all, event_times; cfg, seed)
+        r_on = run_assimilation(params, copy(E0), obs_all, event_times; cfg, seed,
+                                instrument_g = true)
+
+        # 判定数値へ影響ゼロ(絶対条件、#0065): 既定無効時と有効時で
+        # g_diag 以外の全フィールドがビット一致する。
+        @test r_off.X == r_on.X
+        @test r_off.ranks == r_on.ranks
+        @test r_off.ess == r_on.ess
+        @test r_off.nresample == r_on.nresample
+        @test r_off.ts_snap == r_on.ts_snap
+        @test r_off.Xs == r_on.Xs
+        @test r_off.count_observed == r_on.count_observed
+        @test isequal(r_off.count_logscore, r_on.count_logscore)   # NaN 対応
+
+        # 既定無効時は計装ログが空(計算自体を行わない)
+        @test isempty(r_off.g_diag)
+
+        # 有効時はログが記録され、週次カウント更新と観測解析の両方を含む
+        @test !isempty(r_on.g_diag)
+        types = Set(d["update_type"] for d in r_on.g_diag)
+        @test "count_weekly" in types
+        @test "g_swiid_annual" in types
+        # pre/post が対で記録される
+        @test count(d -> d["phase"] == "pre", r_on.g_diag) ==
+              count(d -> d["phase"] == "post", r_on.g_diag)
+        # g_swiid_annual の解析後、以降のログの last_g_swiid_obs が観測値に更新される
+        idx_g = findfirst(d -> d["update_type"] == "g_swiid_annual" && d["phase"] == "post",
+                          r_on.g_diag)
+        @test idx_g !== nothing
+        @test r_on.g_diag[idx_g]["last_g_swiid_obs"] ≈ 0.3
+        for d in r_on.g_diag[(idx_g + 1):end]
+            @test d["last_g_swiid_obs"] ≈ 0.3
+        end
+        # 解析前は g_swiid 未観測(nothing)
+        @test r_on.g_diag[1]["last_g_swiid_obs"] === nothing
+        # g_mean/g_sd は有限な実数(病的値でない)
+        @test all(isfinite(d["g_mean"]) && isfinite(d["g_sd"]) && d["g_sd"] >= 0
+                  for d in r_on.g_diag)
+        # t は単調非減少(ログ順序が時系列どおり)
+        @test issorted(d["t"] for d in r_on.g_diag)
+        # 拡大なしのランでは "aug" キーは省略される(#0066)
+        @test all(!haskey(d, "aug") for d in r_on.g_diag)
+    end
+
+    @testset "g 計装診断: 拡大パラメータ統計と予報窓系列 (#0066)" begin
+        # #0065 のシナリオに L3 拡大(mu_gbar identity + theta_sig log)を加え、
+        # (i) 拡大ラン有効/無効の bitwise 同一性、(ii) 各レコードの "aug"
+        # 統計がリンク座標のアンサンブル実測と一致、(iii) g_aug_series の
+        # 後処理抽出が X の該当断面と厳密一致、を検証する。
+        params = build_params(:volatile)
+        t1 = 3.0
+        truth = simulate_sde(params; seed = 7201, t1 = t1)
+        event_times = [e.t for e in truth.jumps]
+        obs = synthesize_observations(truth.traj, standard_observations(params);
+                                      rng = Xoshiro(7202))
+        g_swiid_spec = ObservationSpec(:g_swiid, 1.0, 0.05, xi -> xi[IX_G], IX_G)
+        obs_all = sort(vcat(obs, [ObservationRecord(2.0, g_swiid_spec, 0.3)]);
+                       by = o -> o.t)
+        N = 30
+        aug = [AugmentedParam(name = :mu_gbar, link = :identity,
+                              init = params.l2.mu_gbar, init_sd = 0.1, rw_sd = 0.02),
+               AugmentedParam(name = :theta_sig, link = :log,
+                              init = params.l3.theta_sig, init_sd = 0.1, rw_sd = 0.01)]
+        E0s = params.x0 .+ 0.3 .* randn(Xoshiro(7203), N_STATE, N)
+        postprocess_analysis!(E0s)
+        E0 = MiraiYohou.augment_ensemble(E0s, aug; rng = Xoshiro(7204))
+        cfg = AssimConfig(t1 = t1)
+        seed = 7205
+
+        r_off = run_assimilation(params, copy(E0), obs_all, event_times;
+                                 cfg, seed, augmented_params = aug)
+        r_on = run_assimilation(params, copy(E0), obs_all, event_times;
+                                cfg, seed, augmented_params = aug,
+                                instrument_g = true)
+
+        # (i) 判定数値へ影響ゼロ(拡大ランでも bitwise 同一)
+        @test r_off.X == r_on.X
+        @test r_off.ranks == r_on.ranks
+        @test r_off.ess == r_on.ess
+        @test r_off.nresample == r_on.nresample
+        @test isequal(r_off.count_logscore, r_on.count_logscore)
+        @test isempty(r_off.g_diag)
+
+        # (ii) 全レコードに拡大パラメータ統計("aug")が付く
+        @test !isempty(r_on.g_diag)
+        for d in r_on.g_diag
+            @test haskey(d, "aug")
+            @test Set(keys(d["aug"])) == Set(["mu_gbar", "theta_sig"])
+            @test d["aug"]["mu_gbar"]["link"] == "identity"
+            @test d["aug"]["theta_sig"]["link"] == "log"
+            @test all(isfinite(d["aug"][k]["mean"]) && d["aug"][k]["sd"] >= 0
+                      for k in ("mu_gbar", "theta_sig"))
+        end
+
+        # (iii) g_aug_series: 実行済み軌道の後処理集計が X の断面と厳密一致
+        ser = MiraiYohou.g_aug_series(r_on.t, r_on.X, aug; stride = 2)
+        @test !isempty(ser)
+        @test ser[1]["t"] == r_on.t[1]
+        @test ser[end]["t"] == r_on.t[end]   # 末端は stride 不一致でも含む
+        @test all(d["phase"] == "series" && d["update_type"] == "forecast_free"
+                  for d in ser)
+        for (d, s) in ((ser[1], 1), (ser[end], length(r_on.t)))
+            gv = vec(r_on.X[IX_G, s, :])
+            @test d["g_mean"] ≈ sum(gv) / N atol = 1e-12
+            @test d["g_sd"] ≈ sqrt(sum(abs2, gv .- sum(gv) / N) / (N - 1)) atol = 1e-12
+            mv = vec(r_on.X[N_STATE + 1, s, :])   # mu_gbar 行(リンク座標)
+            @test d["aug"]["mu_gbar"]["mean"] ≈ sum(mv) / N atol = 1e-12
+        end
+        # 元配列は変更されない(読み取り専用)
+        Xc = copy(r_on.X)
+        MiraiYohou.g_aug_series(r_on.t, r_on.X, aug)
+        @test r_on.X == Xc
+    end
+
     @testset "resample_if_needed!" begin
         rng = Xoshiro(21)
         # 均等な Λ → ESS = N → リサンプリングなし

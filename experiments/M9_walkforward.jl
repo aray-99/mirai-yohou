@@ -24,7 +24,7 @@ using MiraiYohou: N_STATE, member_seed, run_assimilation, free_ensemble,
                   AssimConfig, augment_ensemble, simulate_sde,
                   simulate_sde_augmented, AugmentedParam, intensity,
                   negbin_logpmf, poisson_logpmf, profile_count_dispersion,
-                  windowed_count_total
+                  windowed_count_total, g_aug_series, g_diag_entry, JumpEvent
 
 include(joinpath(@__DIR__, "M8_calibrate.jl"))   # M8_hindcast.jl も連鎖 include 済み
 
@@ -125,7 +125,7 @@ function per_variable_diagnostics(recs, ts, X, window; rng)
 end
 
 """
-    forecast_ensemble(params, aug, res; horizon, seed, dt) -> (; t, X)
+    forecast_ensemble(params, aug, res; horizon, seed, dt) -> (; t, X, jumps)
 
 同化結果 `res` の最終時刻(オリジン t_k)のアンサンブル状態から、内生 Hawkes
 のみ(強制ジャンプなし・同化なし)で `horizon` 年だけ純粋に前進させる
@@ -136,30 +136,44 @@ end
 rw_sd の RW 過程を継続する(同化サイクルの事前生成と同一の生成則 —
 `simulate_sde_augmented`)。戻り値 `X` は N_STATE+K 行(評価関数は先頭
 N_STATE 行のみ参照するのでそのまま渡せる)。
+
+`jumps`(DECISIONS #0067)はメンバー別のジャンプイベント列(`Vector{JumpEvent}`)
+— `simulate_sde_augmented` が内生ジャンプ(thinning)の一部として既に計算
+している値をそのまま返すだけで、追加の乱数消費・数値経路の変更は一切ない
+(読み取り専用の集計。M10 ジャンプバースト仮説診断用)。
+
+`gamma_thinning_p`(既定 1.0、DECISIONS #0068): 予報窓の内生ジャンプに対する
+超過確率シンニング係数。`simulate_sde_augmented` にそのまま伝搬するのみで、
+既定 1.0 では現行と bitwise 同一(後方互換)。
 """
 function forecast_ensemble(params, aug::Vector{AugmentedParam}, res;
                            horizon::Float64 = M9_HORIZON,
-                           seed::Integer, dt::Float64 = 0.01)
+                           seed::Integer, dt::Float64 = 0.01,
+                           gamma_thinning_p::Float64 = 1.0)
     N = size(res.X, 3)
     n = N_STATE + length(aug)
     t0 = res.t[end]
     t1 = t0 + horizon
     nsteps = round(Int, (t1 - t0) / dt)
     X = Array{Float64,3}(undef, n, nsteps + 1, N)
+    jumps = Vector{Vector{JumpEvent}}(undef, N)
     xi0_all = view(res.X, 1:n, size(res.X, 2), :)
     Threads.@threads for j in 1:N
         sim = simulate_sde_augmented(params, aug; seed = member_seed(seed, j),
                                      t0 = t0, t1 = t1, dt = dt,
-                                     xi0 = collect(view(xi0_all, :, j)))
+                                     xi0 = collect(view(xi0_all, :, j)),
+                                     gamma_thinning_p)
         X[:, :, j] = sim.X
+        jumps[j] = sim.jumps
     end
     ts = collect(range(t0; step = dt, length = nsteps + 1))
-    return (; t = ts, X)
+    return (; t = ts, X, jumps)
 end
 
 """
     run_origin(country, t_k, prior_center; N, seed, J, iters, N_eki,
-               include_theta_sig) -> NamedTuple
+               include_theta_sig, prior_sd_override = nothing,
+               validate_prior = false, instrument_g = false) -> NamedTuple
 
 1オリジン分の (較正 → 同化 → 予報 → 自由ラン → 評価)。戻り値に次オリジンへ
 の warm-start 用 `theta_center`(Dict)と評価指標一式を含む。
@@ -170,11 +184,27 @@ end
 M9_negbin_eval.jl と同じ手続き)。その (ν*, r̂) で本同化ラン
 (count_model = :negbin)を実行する。カウント窓が1つも無い場合
 (JPN の t_k ≤ 28 等)は予備ランが本ランを兼ね、r = Inf(実質ポアソン)。
+
+`instrument_g`(既定 false、DECISIONS #0065/#0066/#0067): 両方の
+`run_assimilation` 呼び出しに読み取り専用の g 計装フックを伝搬する。戻り値の
+`g_diag` は実際に採用された最終ラン(カウント窓ありなら NegBin 本ラン、
+無ければ予備ランがそのまま本ランを兼ねる)の `res.g_diag`(#0066/#0067 により
+拡大パラメータ統計・λ_e 統計も含む)を格納する。`g_diag_fore`(#0066/#0067)は
+予報アンサンブル軌道 `fe.X` の週次刻み後処理集計(`g_aug_series`、λ_e 統計
+込み、読み取り専用)。`lame_diag_tk`(#0067)は同化窓末尾(t_k、`res.X` の
+最終時刻列)の λ_e アンサンブル統計1レコード。`jump_diag_fore`(#0067)は
+予報窓中のメンバー別ジャンプ発生数・累積 c_g·m(g 変化のジャンプ寄与)。
+`forced_jump_times_assim`(#0067)は同化窓内の強制ジャンプ時刻カタログ
+(決定論的、`event_times` そのまま)。既定無効時はいずれも計算・格納を行わず
+(空 Dict/Vector)判定数値・乱数消費は完全に不変。
 """
 function run_origin(country::String, t_k::Real,
                     prior_center::Union{Nothing,Dict};
                     N::Int, seed::Integer, J::Int, iters::Int, N_eki::Int,
-                    include_theta_sig::Bool)
+                    include_theta_sig::Bool,
+                    prior_sd_override::Union{Nothing,AbstractDict} = nothing,
+                    validate_prior::Bool = false,
+                    instrument_g::Bool = false)
     ccfg = COUNTRY_CFG[country]
     win_start = ccfg.calib[1]
     window = (win_start, Float64(t_k))
@@ -184,10 +214,13 @@ function run_origin(country::String, t_k::Real,
     println("-- $country origin t=$(t_k) (calib window $window, eval $eval_win) --")
 
     # (a) EKI 再較正(expanding window, warm-start, prior sd 復元)。
-    # ミスフィット定義は M8 手続きのまま(#0054: EKI 内部は変更しない)
+    # ミスフィット定義は M8 手続きのまま(#0054: EKI 内部は変更しない)。
+    # `prior_sd_override` は既定 nothing(M9 の従来動作を変えない後方互換)、
+    # M10(#0062)は mu_gbar のみ独立 sd を渡す。`validate_prior` も既定 false
+    # (M9 の従来動作)、M10(#0064)は true を渡す。
     calib = calibrate(country; J, iters, N = N_eki, seed = seed + 101,
-                      window, prior_center, prior_sd = 0.5, save = false,
-                      include_theta_sig)
+                      window, prior_center, prior_sd = 0.5, prior_sd_override,
+                      save = false, include_theta_sig, validate_prior)
     theta_hat, nu_eki = calib.theta_hat, calib.nu_star
     theta_center = Dict(CAL_PARAMS[k].name => theta_hat[k] for k in eachindex(CAL_PARAMS))
     kw = theta_center
@@ -217,7 +250,8 @@ function run_origin(country::String, t_k::Real,
     # 予備ラン(現行ポアソン + 1/ν): (ν*, r̂) プロファイルの Λ̄_w 供給源
     res = run_assimilation(params, E0, recs_calib, event_times;
                            cfg, seed, obs_counts, count_scale = nu_eki,
-                           count_temper = 1 / nu_eki, augmented_params = aug)
+                           count_temper = 1 / nu_eki, augmented_params = aug,
+                           instrument_g)
     ks = count_windows_in(obs_counts, cfg, window)
     if isempty(ks)
         # カウント窓なし(JPN t_k ≤ 28 等): 予備ランが本ランを兼ねる
@@ -234,12 +268,26 @@ function run_origin(country::String, t_k::Real,
         res = run_assimilation(params, E0, recs_calib, event_times;
                                cfg, seed, obs_counts, count_scale = nu_star,
                                count_model = :negbin, count_dispersion = r_hat,
-                               augmented_params = aug)
+                               augmented_params = aug, instrument_g)
     end
 
+    # p_ex(DECISIONS #0068): 予報窓の内生 Γ ジャンプへの超過確率シンニング係数。
+    # p_ex = (同化窓内の強制ジャンプ週数)/(同化窓内のカウントデータ週数)。
+    # 強制ジャンプ週数は `event_times`(既に t < cfg.t1 でフィルタ済みだが
+    # win_start 側は未フィルタなので、ここで窓 `window` = (win_start, t_k) に
+    # 明示的に絞り込む)。カウントデータ週数は `ks`(同化尤度評価で実際に
+    # 使われる週インデックス列、上の (ν*, r̂) プロファイルと同一定義)。
+    # カウント窓が1つも無ければ p_ex = 1.0(現行動作、フォールバック)。
+    n_forced_window = count(t -> window[1] <= t < window[2], event_times)
+    p_ex = isempty(ks) ? 1.0 : n_forced_window / length(ks)
+    println("  p_ex(Γ シンニング, #0068) = ", round(p_ex, digits = 4),
+            "  (強制ジャンプ週 $n_forced_window / カウントデータ週 $(length(ks)))")
+
     # (c) 1年先予報アンサンブル(拡大事後値の持ち込み + RW 継続、#0053)
+    # 予報アンサンブルの内生ジャンプのみ p_ex でシンニング(#0068)。
+    # 自由ラン・同化・EKI には一切適用しない。
     fe = forecast_ensemble(params, aug, res; horizon = t_fore_end - t_k,
-                           seed = seed + 7)
+                           seed = seed + 7, gamma_thinning_p = p_ex)
 
     # 自由ラン基準(同一較正値・同化なし・同区間、#0052)
     cfg_free = AssimConfig(t0 = 0.0, t1 = t_fore_end)
@@ -292,11 +340,41 @@ function run_origin(country::String, t_k::Real,
                 "  自由 ", round(ll_free, digits = 2))
     end
 
+    # 予報窓計装(#0066): 実行済み予報軌道 fe.X(拡大行込み)の後処理集計のみ
+    # (読み取り専用・乱数消費なし)。既定無効時は計算しない。
+    g_diag_fore = instrument_g ? g_aug_series(fe.t, fe.X, aug) : Dict{String,Any}[]
+
+    # 同化窓末尾(t_k)の λ_e アンサンブル統計(#0067): res.X の最終時刻列
+    # (=t_k)を g_diag_entry に読み取り専用で1回通すだけ(乱数消費なし)。
+    lame_diag_tk = instrument_g ?
+        g_diag_entry(res.t[end], :final, :assim_window_end, res.X[:, end, :],
+                     nothing, aug) : Dict{String,Any}()
+
+    # 予報窓中のメンバー別内生ジャンプ寄与(#0067): fe.jumps は
+    # forecast_ensemble が既に計算済みのイベント列を返しているだけで、
+    # ここでの集計に追加の乱数消費・数値経路の変更は一切ない。
+    # c_g は L3 拡大の対象外(固定パラメータ)なので、全メンバー共通の
+    # params.l2.c_g をそのまま使ってよい。
+    jump_diag_fore = instrument_g ?
+        [Dict{String,Any}("member" => j, "n_jumps" => length(fe.jumps[j]),
+                          "cum_cg_m" => sum(ev -> params.l2.c_g * ev.m, fe.jumps[j];
+                                            init = 0.0))
+         for j in 1:size(fe.X, 3)] : Dict{String,Any}[]
+
+    # 同化窓内の強制ジャンプ時刻(#0067、決定論的なカタログそのまま)。
+    forced_jump_times_assim = instrument_g ? sort(event_times) : Float64[]
+
     return (; t_k = Float64(t_k), theta_center, nu_star, r_hat,
             cov_fore = (hit = hit_f, n = n_f), cov_free = (hit = hit_r, n = n_r),
             var_diag_fore, var_diag_free,
             err_fore, err_free, ll_fore, ll_free, nwin = nwin_fore,
-            resample = res.nresample, ess = extrema(res.ess))
+            resample = res.nresample, ess = extrema(res.ess),
+            g_diag = res.g_diag,       # #0065(instrument_g = false なら常に空)
+            g_diag_fore,               # #0066/#0067 予報窓(同上、λ_e 統計込み)
+            lame_diag_tk,              # #0067 同化窓末尾(t_k)の λ_e 統計
+            jump_diag_fore,            # #0067 予報窓のメンバー別ジャンプ寄与
+            forced_jump_times_assim,   # #0067 同化窓内の強制ジャンプ時刻
+            p_ex)                      # #0068 予報 Γ シンニング係数(来歴)
 end
 
 """
@@ -346,6 +424,25 @@ function run_walkforward(country::String; N::Int = 100, seed::Integer = 20260711
     end
     elapsed = time() - t_start
 
+    return build_walkforward_output(country, orig_list, origin_results, smoke, seed,
+                                    elapsed)
+end
+
+"""
+    build_walkforward_output(country, orig_list, origin_results, smoke, seed, elapsed;
+                             design_decision = "#0052", extra_provenance = Dict()) -> Dict
+
+`run_origin` の戻り値列(`origin_results`)からプール判定値・診断・来歴を
+組み立てる(JSON 化前の中間形)。M9(`run_walkforward`)・M10
+(`M10_walkforward.jl` の `run_walkforward_m10`)で共通利用する(#0062、
+プール集計・判定基準は #0052 と同一のため重複実装を避ける)。
+`extra_provenance` は `provenance` に merge される追加フィールド(M10 の
+prior 規則の記録などに使う)。
+"""
+function build_walkforward_output(country::String, orig_list, origin_results, smoke::Bool,
+                                  seed::Integer, elapsed::Float64;
+                                  design_decision::String = "#0052",
+                                  extra_provenance::AbstractDict = Dict())
     # プール集計(#0052: 全オリジンをプールした国別判定値)
     hit_f = sum(r.cov_fore.hit for r in origin_results)
     n_f = sum(r.cov_fore.n for r in origin_results)
@@ -447,15 +544,16 @@ function run_walkforward(country::String; N::Int = 100, seed::Integer = 20260711
             "variable_coverage_forecast" => r.var_diag_fore,
             "variable_coverage_free" => r.var_diag_free,
             "ll_forecast" => r.ll_fore, "ll_free" => r.ll_free, "nwin" => r.nwin,
-            "resample" => r.resample, "ess_range" => collect(r.ess))
+            "resample" => r.resample, "ess_range" => collect(r.ess),
+            "gamma_thinning_p" => r.p_ex)   # #0068 予報 Γ シンニング係数
             for r in origin_results],
         "elapsed_sec" => elapsed,
-        "provenance" => Dict(
+        "provenance" => merge(Dict(
             "commit" => strip(read(`git -C $(dirname(@__DIR__)) rev-parse HEAD`, String)),
             "seed" => seed,
             "generated_at" => Dates.format(now(), dateformat"yyyy-mm-ddTHH:MM:SS"),
             "frozen_decisions" => frozen_decisions_string(),
-            "design_decision" => "#0052"))
+            "design_decision" => design_decision), extra_provenance))
 end
 
 function parse_origins(spec::AbstractString)

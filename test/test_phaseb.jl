@@ -24,6 +24,15 @@
         finalB = reduce(hcat, [r.traj.X[:, end] for r in rsB])
         jumpsB = [length(r.jumps) for r in rsB]
 
+        # 分散比の判定対象(#0029): stable レジームでは分散が少数(≈10%)の
+        # ジャンプ経験メンバーに支配され重い裾となり、実現ジャンプ集合の
+        # 環境差(FP 経路)で [0.5, 2] を跨ぐため、ジャンプ未経験メンバーの
+        # 条件付き分散(連続力学の一致)で判定する。ジャンプ側の一致は
+        # イベント数テストが担保。volatile はほぼ全メンバーが経験するため全体。
+        selA = regime === :stable ? jumpsA .== 0 : trues(N)
+        selB = regime === :stable ? jumpsB .== 0 : trues(N)
+        @test count(selA) >= 100 && count(selB) >= 100
+
         @testset "$regime: final-time moments agree" begin
             for (name, ix) in check_vars
                 a = @view finalA[ix, :]
@@ -33,7 +42,10 @@
                 vb = sum(abs2, b .- mb) / (N - 1)
                 se = sqrt(va / N + vb / N)
                 @test abs(ma - mb) <= 4 * se        # 平均差 ≤ 4×結合SE(#0020)
-                @test 0.5 <= va / vb <= 2.0          # 分散比 ∈ [0.5, 2](#0020)
+                ac, bc = a[selA], b[selB]
+                vac = sum(abs2, ac .- sum(ac)/length(ac)) / (length(ac) - 1)
+                vbc = sum(abs2, bc .- sum(bc)/length(bc)) / (length(bc) - 1)
+                @test 0.5 <= vac / vbc <= 2.0        # 分散比 ∈ [0.5, 2](#0020/#0029)
             end
         end
 

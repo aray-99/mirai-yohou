@@ -3,8 +3,9 @@
 # - World Bank API から自動取得(P, w, y, g, T代理, phi, v)。年次。
 # - tau(WVS)・p(V-Dem)はローカルファイルのローダ(手動ダウンロード。
 #   各 load_* の docstring 参照)。
-# - ACLED はアクセスキーが必要(ENV["ACLED_ACCESS_KEY"] / ["ACLED_EMAIL"])。
-#   キー未設定ではスタブがガイダンスを出して停止する。
+# - ACLED は OAuth(password grant)で取得(ENV["ACLED_USERNAME"] /
+#   ["ACLED_PASSWORD"])。認証仕様と権限(Research access)の経緯は
+#   DECISIONS #0026 と https://github.com/aray-99/acled-client 参照。
 # - 出力: experiments/data/raw/<ISO3>_<var>.csv(year,value)+ 来歴サイドカー
 #   JSON(ソース URL・指標 ID・取得日時・API の lastupdated)。キャッシュ済み
 #   ファイルは再取得しない(force=true で上書き)。
@@ -71,9 +72,18 @@ function load_series(csvpath::String)
 end
 
 """
-tau(制度信頼)ローダ: World Values Survey の信頼設問(国・波別集計)を
-手動で experiments/data/raw/<ISO3>_tau.csv(year,value。value は 0〜1)に
-置く。WVS は https://www.worldvaluessurvey.org からの登録ダウンロード。
+tau(制度信頼)ローダ: World Values Survey の政府信頼設問を国・波別に集計し、
+手動で experiments/data/raw/<ISO3>_tau.csv(year,value。value は 0〜1)に置く。
+
+作成手順(ユーザー側作業):
+- 設問: E069_11 "Confidence: The Government"。
+  value = (A great deal + Quite a lot の回答割合) / 有効回答(0〜1)。
+  year = 各波のフィールドワーク年(日本: 1981/1990/1995/2000/2005/2010/2019、
+  タイ: 2007/2013/2018)。
+- 経路A(登録不要): https://www.worldvaluessurvey.org → Data and Documentation
+  → Online Analysis で国・波ごとに設問の度数表を表示し、割合を転記。
+- 経路B(登録): 同サイトから Time-series (1981-2022) データを登録ダウンロードし、
+  E069_11 を国・波で集計。
 """
 function load_tau(country::String)
     p = joinpath(RAW_DIR, "$(country)_tau.csv")
@@ -92,15 +102,94 @@ function load_p(country::String)
     return load_series(p)
 end
 
+# ---- ACLED(イベントデータ。DECISIONS #0026)----
+#
+# OAuth password grant(access_token 24時間)→ /api/acled/read を Bearer で
+# ページング取得。Research access ティアは直近12ヶ月のイベント単位データが
+# エンバーゴ(#0026)。認証フローの検証記録:
+# https://github.com/aray-99/acled-client (TROUBLESHOOTING.md)
+
+const ACLED_TOKEN_URL = "https://acleddata.com/oauth/token"
+const ACLED_READ_URL = "https://acleddata.com/api/acled/read"
+const ACLED_COUNTRY = Dict("JPN" => "Japan", "THA" => "Thailand")
+const ACLED_FIELDS = ["event_id_cnty", "event_date", "year", "disorder_type",
+                      "event_type", "sub_event_type", "admin1", "fatalities"]
+
+urlencode(s::AbstractString) =
+    join(c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~" ?
+         string(c) : join("%" * uppercase(string(b, base = 16, pad = 2))
+                          for b in codeunits(string(c)))
+         for c in s)
+
+formbody(pairs) =
+    join(("$(urlencode(string(k)))=$(urlencode(string(v)))" for (k, v) in pairs), "&")
+
+function acled_token()
+    user = get(ENV, "ACLED_USERNAME", "")
+    pass = get(ENV, "ACLED_PASSWORD", "")
+    (isempty(user) || isempty(pass)) &&
+        error("ACLED の認証情報が未設定です。myACLED アカウント(Research access 承認済み)の " *
+              "ENV[\"ACLED_USERNAME\"] と ENV[\"ACLED_PASSWORD\"] を設定してください")
+    body = formbody(["username" => user, "password" => pass,
+                     "grant_type" => "password", "client_id" => "acled",
+                     "scope" => "authenticated"])
+    out = IOBuffer()
+    resp = Downloads.request(ACLED_TOKEN_URL; method = "POST",
+        input = IOBuffer(body), output = out,
+        headers = ["Content-Type" => "application/x-www-form-urlencoded"])
+    resp.status == 200 || error("ACLED トークン取得に失敗 (HTTP $(resp.status)): $(String(take!(out)))")
+    return JSON3.read(String(take!(out))).access_token
+end
+
 """
-ACLED イベント取得スタブ: ENV["ACLED_ACCESS_KEY"] と ENV["ACLED_EMAIL"] が必要
-(https://acleddata.com で無償登録)。キー設定後に実装を有効化する(M8)。
+ACLED イベント取得: 国別のイベント単位データ(event_date, event_type, fatalities)を
+取得し `<ISO3>_events.csv` にキャッシュする。年範囲は ACLED のカバレッジ開始〜現在
+(エンバーゴ分はサーバ側で欠ける)。403 の場合はアカウント権限の問題
+(https://github.com/aray-99/acled-client/blob/main/TROUBLESHOOTING.md)。
 """
-function fetch_acled(country::String; force::Bool = false)
-    haskey(ENV, "ACLED_ACCESS_KEY") && haskey(ENV, "ACLED_EMAIL") ||
-        error("ACLED のアクセスキーが未設定です。https://acleddata.com で登録し、" *
-              "ENV[\"ACLED_ACCESS_KEY\"] と ENV[\"ACLED_EMAIL\"] を設定してください")
-    error("ACLED フェッチャは M8 で実装(キー確認後)")
+function fetch_acled(country::String; force::Bool = false, year_from::Int = 2010)
+    mkpath(RAW_DIR)
+    csvpath = joinpath(RAW_DIR, "$(country)_events.csv")
+    if isfile(csvpath) && !force
+        println("cached: $csvpath")
+        return csvpath
+    end
+    token = acled_token()
+    cname = ACLED_COUNTRY[country]
+    rows = Any[]
+    page, limit = 1, 5000
+    while true
+        query = join(["country=$(urlencode(cname))",
+                      "year=$(year_from)|$(Dates.year(now()))", "year_where=BETWEEN",
+                      "fields=$(join(ACLED_FIELDS, '|'))",
+                      "limit=$limit", "page=$page", "_format=json"], "&")
+        out = IOBuffer()
+        resp = Downloads.request("$ACLED_READ_URL?$query"; method = "GET", output = out,
+            headers = ["Authorization" => "Bearer $token"])
+        resp.status == 200 || error("ACLED read に失敗 (HTTP $(resp.status)): " *
+                                    "$(String(take!(out)))(403 なら権限未付与。#0026 参照)")
+        doc = JSON3.read(String(take!(out)))
+        batch = get(doc, "data", [])
+        append!(rows, batch)
+        length(batch) < limit && break
+        page += 1
+    end
+    sort!(rows; by = r -> string(r.event_date))
+    open(csvpath, "w") do io
+        println(io, join(ACLED_FIELDS, ","))
+        for r in rows   # 選択フィールドはいずれもカンマを含まない語彙(#0026)
+            println(io, join((string(get(r, Symbol(f), "")) for f in ACLED_FIELDS), ","))
+        end
+    end
+    write(csvpath * ".meta.json", JSON3.write(Dict(
+        "source" => "ACLED API (OAuth, Research access)", "url" => ACLED_READ_URL,
+        "country" => cname, "year_from" => year_from, "n_events" => length(rows),
+        "date_range" => isempty(rows) ? "" :
+            "$(rows[1].event_date)–$(rows[end].event_date)",
+        "embargo_note" => "Research access は直近12ヶ月のイベント単位データを含まない(#0026)",
+        "fetched_at" => Dates.format(now(), dateformat"yyyy-mm-ddTHH:MM:SS"))))
+    println("fetched: $csvpath ($(length(rows)) events)")
+    return csvpath
 end
 
 function main()
@@ -121,7 +210,18 @@ function main()
                     isempty(ys) ? "" : "$(ys[1])–$(ys[end])")
         end
     end
-    println("\ntau(WVS)・p(V-Dem)・ACLED は手動/キー設定が必要(各 docstring 参照)")
+    if haskey(ENV, "ACLED_USERNAME") && haskey(ENV, "ACLED_PASSWORD")
+        for c in COUNTRIES
+            try
+                fetch_acled(c; force)
+            catch e
+                println("WARN: ACLED $c failed: ", sprint(showerror, e))
+            end
+        end
+    else
+        println("\nACLED はスキップ(ENV[\"ACLED_USERNAME\"]/[\"ACLED_PASSWORD\"] 未設定。#0026)")
+    end
+    println("\ntau(WVS)・p(V-Dem)は手動配置が必要(各 docstring 参照)")
 end
 
 abspath(PROGRAM_FILE) == (@__FILE__) && main()

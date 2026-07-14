@@ -40,17 +40,39 @@ struct SDEResult
     jumps::Vector{JumpEvent}
 end
 
+# σ_s ステップガード(DECISIONS #0032): 式(11)の log 座標 drift は
+# L·e^{-ξ_sig} 項をもち、L < 0 で σ_s → 0 に緩和する領域(実データの
+# 安定国で恒常的に発生)では |drift| が指数発散して固定刻み EM が
+# 破綻する。lam_bar・#0011 と同種の数値安全弁として、
+#   (i) tame: |f_sig| ≤ SIG_DRIFT_MAX(双子実験の領域では |f_sig| ≲ 5
+#       で不発火 — 力学・既存結果を変えない)
+#   (ii) floor: ξ_sig ≥ XI_SIG_FLOOR(σ_s ≈ 6e-6。復帰時間を有界に保つ)
+const SIG_DRIFT_MAX = 50.0    # /年(dt = 0.01 で最大 |Δξ| = 0.5)
+const XI_SIG_FLOOR = -12.0
+
+@inline guard_sigma_drift!(f::AbstractVector) =
+    (f[IX_SIG] = clamp(f[IX_SIG], -SIG_DRIFT_MAX, SIG_DRIFT_MAX); f)
+@inline guard_sigma_state!(xi::AbstractVector) =
+    (xi[IX_SIG] = max(xi[IX_SIG], XI_SIG_FLOOR); xi)
+
 # 格子区間 [t, t+dt) の内生ジャンプ(Ogata thinning、§10 擬似コード)。
 # 受理のたびに Γ を適用し、以後の候補は更新後の状態で評価する。
-function _jumps_in_interval!(xi::Vector{Float64}, t::Float64, t_next::Float64,
+#
+# `gamma_thinning_p`(DECISIONS #0068、既定 1.0 = 現行動作): 予報窓の内生
+# ジャンプに対する超過確率シンニング。候補時刻列の生成(lam_bar 上限レート)
+# と候補判定用の乱数消費(rand(rng) の呼び出し回数・順序)は変えず、採択
+# 判定 `u < intensity/lam_bar` の右辺に p を乗じることで採択確率のみを
+# 下げる(u < p·intensity/lam_bar)。p=1 のとき既存条件と bitwise 同一。
+function _jumps_in_interval!(xi::AbstractVector{Float64}, t::Float64, t_next::Float64,
                              params::ModelParameters, rng::AbstractRNG,
-                             jumps::Vector{JumpEvent})
+                             jumps::Vector{JumpEvent};
+                             gamma_thinning_p::Float64 = 1.0)
     lam_bar = params.l2.lam_bar
     tj = t
     while true
         tj += randexp(rng) / lam_bar
         tj >= t_next && break
-        if rand(rng) < intensity(xi, params) / lam_bar   # 直前状態で近似(O(dt))
+        if rand(rng) < gamma_thinning_p * intensity(xi, params) / lam_bar   # 直前状態で近似(O(dt))
             rho = draw_mark(rng, params)
             m = apply_jump!(xi, rho, params)
             push!(jumps, JumpEvent(tj, rho, m))
@@ -105,11 +127,13 @@ function simulate_sde(params::ModelParameters;
             end
         end
 
-        # (b) Euler–Maruyama ステップ
+        # (b) Euler–Maruyama ステップ(σ_s ガード #0032)
         drift!(f, xi, params, t)
+        guard_sigma_drift!(f)
         diffusion!(sig, xi, params, t)
         randn!(rng, dW)
         @. xi += dt * f + sqdt * sig * dW
+        guard_sigma_state!(xi)
         X[:, step + 1] = xi
     end
     return SDEResult(Trajectory(ts, X), jumps)

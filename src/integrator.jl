@@ -57,15 +57,22 @@ const XI_SIG_FLOOR = -12.0
 
 # 格子区間 [t, t+dt) の内生ジャンプ(Ogata thinning、§10 擬似コード)。
 # 受理のたびに Γ を適用し、以後の候補は更新後の状態で評価する。
+#
+# `gamma_thinning_p`(DECISIONS #0068、既定 1.0 = 現行動作): 予報窓の内生
+# ジャンプに対する超過確率シンニング。候補時刻列の生成(lam_bar 上限レート)
+# と候補判定用の乱数消費(rand(rng) の呼び出し回数・順序)は変えず、採択
+# 判定 `u < intensity/lam_bar` の右辺に p を乗じることで採択確率のみを
+# 下げる(u < p·intensity/lam_bar)。p=1 のとき既存条件と bitwise 同一。
 function _jumps_in_interval!(xi::AbstractVector{Float64}, t::Float64, t_next::Float64,
                              params::ModelParameters, rng::AbstractRNG,
-                             jumps::Vector{JumpEvent})
+                             jumps::Vector{JumpEvent};
+                             gamma_thinning_p::Float64 = 1.0)
     lam_bar = params.l2.lam_bar
     tj = t
     while true
         tj += randexp(rng) / lam_bar
         tj >= t_next && break
-        if rand(rng) < intensity(xi, params) / lam_bar   # 直前状態で近似(O(dt))
+        if rand(rng) < gamma_thinning_p * intensity(xi, params) / lam_bar   # 直前状態で近似(O(dt))
             rho = draw_mark(rng, params)
             m = apply_jump!(xi, rho, params)
             push!(jumps, JumpEvent(tj, rho, m))

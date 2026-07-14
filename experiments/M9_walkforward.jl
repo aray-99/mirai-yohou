@@ -141,10 +141,15 @@ N_STATE 行のみ参照するのでそのまま渡せる)。
 — `simulate_sde_augmented` が内生ジャンプ(thinning)の一部として既に計算
 している値をそのまま返すだけで、追加の乱数消費・数値経路の変更は一切ない
 (読み取り専用の集計。M10 ジャンプバースト仮説診断用)。
+
+`gamma_thinning_p`(既定 1.0、DECISIONS #0068): 予報窓の内生ジャンプに対する
+超過確率シンニング係数。`simulate_sde_augmented` にそのまま伝搬するのみで、
+既定 1.0 では現行と bitwise 同一(後方互換)。
 """
 function forecast_ensemble(params, aug::Vector{AugmentedParam}, res;
                            horizon::Float64 = M9_HORIZON,
-                           seed::Integer, dt::Float64 = 0.01)
+                           seed::Integer, dt::Float64 = 0.01,
+                           gamma_thinning_p::Float64 = 1.0)
     N = size(res.X, 3)
     n = N_STATE + length(aug)
     t0 = res.t[end]
@@ -156,7 +161,8 @@ function forecast_ensemble(params, aug::Vector{AugmentedParam}, res;
     Threads.@threads for j in 1:N
         sim = simulate_sde_augmented(params, aug; seed = member_seed(seed, j),
                                      t0 = t0, t1 = t1, dt = dt,
-                                     xi0 = collect(view(xi0_all, :, j)))
+                                     xi0 = collect(view(xi0_all, :, j)),
+                                     gamma_thinning_p)
         X[:, :, j] = sim.X
         jumps[j] = sim.jumps
     end
@@ -265,9 +271,23 @@ function run_origin(country::String, t_k::Real,
                                augmented_params = aug, instrument_g)
     end
 
+    # p_ex(DECISIONS #0068): 予報窓の内生 Γ ジャンプへの超過確率シンニング係数。
+    # p_ex = (同化窓内の強制ジャンプ週数)/(同化窓内のカウントデータ週数)。
+    # 強制ジャンプ週数は `event_times`(既に t < cfg.t1 でフィルタ済みだが
+    # win_start 側は未フィルタなので、ここで窓 `window` = (win_start, t_k) に
+    # 明示的に絞り込む)。カウントデータ週数は `ks`(同化尤度評価で実際に
+    # 使われる週インデックス列、上の (ν*, r̂) プロファイルと同一定義)。
+    # カウント窓が1つも無ければ p_ex = 1.0(現行動作、フォールバック)。
+    n_forced_window = count(t -> window[1] <= t < window[2], event_times)
+    p_ex = isempty(ks) ? 1.0 : n_forced_window / length(ks)
+    println("  p_ex(Γ シンニング, #0068) = ", round(p_ex, digits = 4),
+            "  (強制ジャンプ週 $n_forced_window / カウントデータ週 $(length(ks)))")
+
     # (c) 1年先予報アンサンブル(拡大事後値の持ち込み + RW 継続、#0053)
+    # 予報アンサンブルの内生ジャンプのみ p_ex でシンニング(#0068)。
+    # 自由ラン・同化・EKI には一切適用しない。
     fe = forecast_ensemble(params, aug, res; horizon = t_fore_end - t_k,
-                           seed = seed + 7)
+                           seed = seed + 7, gamma_thinning_p = p_ex)
 
     # 自由ラン基準(同一較正値・同化なし・同区間、#0052)
     cfg_free = AssimConfig(t0 = 0.0, t1 = t_fore_end)
@@ -353,7 +373,8 @@ function run_origin(country::String, t_k::Real,
             g_diag_fore,               # #0066/#0067 予報窓(同上、λ_e 統計込み)
             lame_diag_tk,              # #0067 同化窓末尾(t_k)の λ_e 統計
             jump_diag_fore,            # #0067 予報窓のメンバー別ジャンプ寄与
-            forced_jump_times_assim)   # #0067 同化窓内の強制ジャンプ時刻
+            forced_jump_times_assim,   # #0067 同化窓内の強制ジャンプ時刻
+            p_ex)                      # #0068 予報 Γ シンニング係数(来歴)
 end
 
 """
@@ -523,7 +544,8 @@ function build_walkforward_output(country::String, orig_list, origin_results, sm
             "variable_coverage_forecast" => r.var_diag_fore,
             "variable_coverage_free" => r.var_diag_free,
             "ll_forecast" => r.ll_fore, "ll_free" => r.ll_free, "nwin" => r.nwin,
-            "resample" => r.resample, "ess_range" => collect(r.ess))
+            "resample" => r.resample, "ess_range" => collect(r.ess),
+            "gamma_thinning_p" => r.p_ex)   # #0068 予報 Γ シンニング係数
             for r in origin_results],
         "elapsed_sec" => elapsed,
         "provenance" => merge(Dict(

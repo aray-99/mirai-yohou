@@ -807,13 +807,18 @@ end
 
 `xi0` は長さ `N_STATE + length(augmented_params)`(拡大行はリンク座標)。
 戻り値 `X` も同じ行数(拡大行の軌道を含む)。
+
+`gamma_thinning_p`(DECISIONS #0068、既定 1.0 = 現行動作): 予報窓の内生
+ジャンプに対する超過確率シンニング係数。`_jumps_in_interval!` の採択判定
+にのみ乗算され、候補時刻列の乱数消費は変えない(p=1 で bitwise 同一)。
 """
 function simulate_sde_augmented(params::ModelParameters,
                                 augmented_params::Vector{AugmentedParam};
                                 seed::Integer,
                                 t0::Float64 = 0.0, t1::Float64 = 50.0,
                                 dt::Float64 = 0.01,
-                                xi0::AbstractVector{Float64})
+                                xi0::AbstractVector{Float64},
+                                gamma_thinning_p::Float64 = 1.0)
     n = N_STATE + length(augmented_params)
     length(xi0) == n ||
         throw(DimensionMismatch("xi0 has $(length(xi0)) rows, expected $n " *
@@ -838,7 +843,7 @@ function simulate_sde_augmented(params::ModelParameters,
         p = build_member_params(params, augmented_params, Ecol, N_STATE, 1)
 
         # (a) 内生ジャンプ(Ogata thinning。現在の拡大値のパラメータで評価)
-        _jumps_in_interval!(xi, t, t_next, p, rng, jumps)
+        _jumps_in_interval!(xi, t, t_next, p, rng, jumps; gamma_thinning_p = gamma_thinning_p)
 
         # (b) EM ステップ(σ_s ガード #0032)+ 拡大行 RW(§8.3/#0046 と同一則)
         drift!(f, xi, p, t)

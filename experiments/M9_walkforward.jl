@@ -24,7 +24,7 @@ using MiraiYohou: N_STATE, member_seed, run_assimilation, free_ensemble,
                   AssimConfig, augment_ensemble, simulate_sde,
                   simulate_sde_augmented, AugmentedParam, intensity,
                   negbin_logpmf, poisson_logpmf, profile_count_dispersion,
-                  windowed_count_total, g_aug_series
+                  windowed_count_total, g_aug_series, g_diag_entry, JumpEvent
 
 include(joinpath(@__DIR__, "M8_calibrate.jl"))   # M8_hindcast.jl も連鎖 include 済み
 
@@ -125,7 +125,7 @@ function per_variable_diagnostics(recs, ts, X, window; rng)
 end
 
 """
-    forecast_ensemble(params, aug, res; horizon, seed, dt) -> (; t, X)
+    forecast_ensemble(params, aug, res; horizon, seed, dt) -> (; t, X, jumps)
 
 同化結果 `res` の最終時刻(オリジン t_k)のアンサンブル状態から、内生 Hawkes
 のみ(強制ジャンプなし・同化なし)で `horizon` 年だけ純粋に前進させる
@@ -136,6 +136,11 @@ end
 rw_sd の RW 過程を継続する(同化サイクルの事前生成と同一の生成則 —
 `simulate_sde_augmented`)。戻り値 `X` は N_STATE+K 行(評価関数は先頭
 N_STATE 行のみ参照するのでそのまま渡せる)。
+
+`jumps`(DECISIONS #0067)はメンバー別のジャンプイベント列(`Vector{JumpEvent}`)
+— `simulate_sde_augmented` が内生ジャンプ(thinning)の一部として既に計算
+している値をそのまま返すだけで、追加の乱数消費・数値経路の変更は一切ない
+(読み取り専用の集計。M10 ジャンプバースト仮説診断用)。
 """
 function forecast_ensemble(params, aug::Vector{AugmentedParam}, res;
                            horizon::Float64 = M9_HORIZON,
@@ -146,15 +151,17 @@ function forecast_ensemble(params, aug::Vector{AugmentedParam}, res;
     t1 = t0 + horizon
     nsteps = round(Int, (t1 - t0) / dt)
     X = Array{Float64,3}(undef, n, nsteps + 1, N)
+    jumps = Vector{Vector{JumpEvent}}(undef, N)
     xi0_all = view(res.X, 1:n, size(res.X, 2), :)
     Threads.@threads for j in 1:N
         sim = simulate_sde_augmented(params, aug; seed = member_seed(seed, j),
                                      t0 = t0, t1 = t1, dt = dt,
                                      xi0 = collect(view(xi0_all, :, j)))
         X[:, :, j] = sim.X
+        jumps[j] = sim.jumps
     end
     ts = collect(range(t0; step = dt, length = nsteps + 1))
-    return (; t = ts, X)
+    return (; t = ts, X, jumps)
 end
 
 """
@@ -172,13 +179,18 @@ M9_negbin_eval.jl と同じ手続き)。その (ν*, r̂) で本同化ラン
 (count_model = :negbin)を実行する。カウント窓が1つも無い場合
 (JPN の t_k ≤ 28 等)は予備ランが本ランを兼ね、r = Inf(実質ポアソン)。
 
-`instrument_g`(既定 false、DECISIONS #0065/#0066): 両方の
+`instrument_g`(既定 false、DECISIONS #0065/#0066/#0067): 両方の
 `run_assimilation` 呼び出しに読み取り専用の g 計装フックを伝搬する。戻り値の
 `g_diag` は実際に採用された最終ラン(カウント窓ありなら NegBin 本ラン、
-無ければ予備ランがそのまま本ランを兼ねる)の `res.g_diag`(#0066 により
-拡大パラメータ統計も含む)を格納する。`g_diag_fore`(#0066)は予報
-アンサンブル軌道 `fe.X` の週次刻み後処理集計(`g_aug_series`、読み取り専用)。
-既定無効時は計算そのものを行わないため判定数値・乱数消費は完全に不変。
+無ければ予備ランがそのまま本ランを兼ねる)の `res.g_diag`(#0066/#0067 により
+拡大パラメータ統計・λ_e 統計も含む)を格納する。`g_diag_fore`(#0066/#0067)は
+予報アンサンブル軌道 `fe.X` の週次刻み後処理集計(`g_aug_series`、λ_e 統計
+込み、読み取り専用)。`lame_diag_tk`(#0067)は同化窓末尾(t_k、`res.X` の
+最終時刻列)の λ_e アンサンブル統計1レコード。`jump_diag_fore`(#0067)は
+予報窓中のメンバー別ジャンプ発生数・累積 c_g·m(g 変化のジャンプ寄与)。
+`forced_jump_times_assim`(#0067)は同化窓内の強制ジャンプ時刻カタログ
+(決定論的、`event_times` そのまま)。既定無効時はいずれも計算・格納を行わず
+(空 Dict/Vector)判定数値・乱数消費は完全に不変。
 """
 function run_origin(country::String, t_k::Real,
                     prior_center::Union{Nothing,Dict};
@@ -312,13 +324,36 @@ function run_origin(country::String, t_k::Real,
     # (読み取り専用・乱数消費なし)。既定無効時は計算しない。
     g_diag_fore = instrument_g ? g_aug_series(fe.t, fe.X, aug) : Dict{String,Any}[]
 
+    # 同化窓末尾(t_k)の λ_e アンサンブル統計(#0067): res.X の最終時刻列
+    # (=t_k)を g_diag_entry に読み取り専用で1回通すだけ(乱数消費なし)。
+    lame_diag_tk = instrument_g ?
+        g_diag_entry(res.t[end], :final, :assim_window_end, res.X[:, end, :],
+                     nothing, aug) : Dict{String,Any}()
+
+    # 予報窓中のメンバー別内生ジャンプ寄与(#0067): fe.jumps は
+    # forecast_ensemble が既に計算済みのイベント列を返しているだけで、
+    # ここでの集計に追加の乱数消費・数値経路の変更は一切ない。
+    # c_g は L3 拡大の対象外(固定パラメータ)なので、全メンバー共通の
+    # params.l2.c_g をそのまま使ってよい。
+    jump_diag_fore = instrument_g ?
+        [Dict{String,Any}("member" => j, "n_jumps" => length(fe.jumps[j]),
+                          "cum_cg_m" => sum(ev -> params.l2.c_g * ev.m, fe.jumps[j];
+                                            init = 0.0))
+         for j in 1:size(fe.X, 3)] : Dict{String,Any}[]
+
+    # 同化窓内の強制ジャンプ時刻(#0067、決定論的なカタログそのまま)。
+    forced_jump_times_assim = instrument_g ? sort(event_times) : Float64[]
+
     return (; t_k = Float64(t_k), theta_center, nu_star, r_hat,
             cov_fore = (hit = hit_f, n = n_f), cov_free = (hit = hit_r, n = n_r),
             var_diag_fore, var_diag_free,
             err_fore, err_free, ll_fore, ll_free, nwin = nwin_fore,
             resample = res.nresample, ess = extrema(res.ess),
             g_diag = res.g_diag,       # #0065(instrument_g = false なら常に空)
-            g_diag_fore)               # #0066 予報窓(同上)
+            g_diag_fore,               # #0066/#0067 予報窓(同上、λ_e 統計込み)
+            lame_diag_tk,              # #0067 同化窓末尾(t_k)の λ_e 統計
+            jump_diag_fore,            # #0067 予報窓のメンバー別ジャンプ寄与
+            forced_jump_times_assim)   # #0067 同化窓内の強制ジャンプ時刻
 end
 
 """

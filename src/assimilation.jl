@@ -84,11 +84,13 @@ struct AssimResult
     Xs::Array{Float64,3}                 # 平滑化アンサンブル(行 × スナップ × メンバー)
     count_observed::Vector{Int}          # 各週次窓の観測カウント(-1 = データなし、#0054)
     count_logscore::Vector{Float64}      # 各週次窓の1ステップ先予測 log スコア(NaN = データなし、#0054)
-    # g 計装診断(DECISIONS #0065/#0066)。`instrument_g = false`(既定)なら
-    # 常に空ベクトル(計算自体を行わない、後方互換・判定数値に無関係)。各要素は
-    # Dict("t", "phase" [:pre/:post], "update_type"
+    # g 計装診断(DECISIONS #0065/#0066/#0067)。`instrument_g = false`(既定)
+    # なら常に空ベクトル(計算自体を行わない、後方互換・判定数値に無関係)。
+    # 各要素は Dict("t", "phase" [:pre/:post], "update_type"
     # [:count_weekly/:g_swiid_annual/:other_obs], "g_mean", "g_sd",
-    # "last_g_swiid_obs", "aug")。"aug" は拡大パラメータ別の
+    # "last_g_swiid_obs", "lame", "aug")。"lame" は Hawkes 自己励起状態 λ_e
+    # (IX_LAME、自然座標)の Dict("mean", "sd", "q10", "q50", "q90")(#0067、
+    # aug の有無に関わらず常時記録)。"aug" は拡大パラメータ別の
     # Dict(name => Dict("link", "mean", "sd"))(#0066。統計は**内部リンク座標**
     # — :log リンクなら log(自然値) の平均・sd、:identity なら自然値そのまま。
     # 拡大なしのランでは "aug" キー自体を省略)。読み取り専用の診断で、
@@ -341,22 +343,48 @@ function _row_mean_sd(row::AbstractVector{Float64})
 end
 
 """
+    _row_quantiles(row, qs) -> Vector{Float64}
+
+アンサンブル行1本(読み取り専用)の分位点(線形補間、Julia
+`Statistics.quantile` 既定アルゴリズム(Type 7)と同じ定義)。`src/` は
+Statistics に依存しないための手書きヘルパ(DECISIONS #0067)。`row` は
+非破壊(内部でソート用にコピーする)。
+"""
+function _row_quantiles(row::AbstractVector{Float64}, qs::AbstractVector{Float64})
+    s = sort(row)
+    n = length(s)
+    return [begin
+        h = (n - 1) * q + 1
+        lo = clamp(floor(Int, h), 1, n)
+        hi = clamp(ceil(Int, h), 1, n)
+        s[lo] + (h - lo) * (s[hi] - s[lo])
+    end for q in qs]
+end
+
+"""
     g_diag_entry(t, phase, update_type, E, last_g_swiid_val,
                  aug_params = AugmentedParam[]) -> Dict
 
-g 計装診断1レコード(DECISIONS #0065/#0066)。`E`(全行 × N メンバー)の
+g 計装診断1レコード(DECISIONS #0065/#0066/#0067)。`E`(全行 × N メンバー)の
 `IX_G` 行と各拡大パラメータ行(`aug_params` の記述子順、N_STATE+1 以降)から
 読み取り専用で加重なし平均・標本標準偏差(不偏補正、N>1)を計算するだけで、
 `E` そのものは一切変更しない。拡大パラメータの統計は**内部リンク座標**
 (`:log` なら log(自然値))で記録し、各エントリに "link" を明記する
 (#0066。`aug_params` が空なら "aug" キー自体を省略)。`last_g_swiid_val` は
 直近に観測された g_swiid 値(まだ観測が無ければ `nothing`)。
+
+Hawkes 自己励起状態 λ_e(`IX_LAME` 行、**自然座標**≥0。log/logit 変換なし
+— src/coordinates.jl)の平均・標本標準偏差・分位点(10/50/90%)を "lame" キー
+に常時記録する(#0067。M10 のジャンプバースト仮説診断用)。
 """
 function g_diag_entry(t::Float64, phase::Symbol, update_type::Symbol,
                       E::AbstractMatrix{Float64},
                       last_g_swiid_val::Union{Nothing,Float64},
                       aug_params::Vector{AugmentedParam} = AugmentedParam[])
     gmean, gsd = _row_mean_sd(view(E, IX_G, :))
+    lame_row = collect(view(E, IX_LAME, :))
+    lmean, lsd = _row_mean_sd(lame_row)
+    lq10, lq50, lq90 = _row_quantiles(lame_row, [0.1, 0.5, 0.9])
     entry = Dict{String,Any}(
         "t" => t,
         "phase" => String(phase),
@@ -364,6 +392,9 @@ function g_diag_entry(t::Float64, phase::Symbol, update_type::Symbol,
         "g_mean" => gmean,
         "g_sd" => gsd,
         "last_g_swiid_obs" => last_g_swiid_val,
+        "lame" => Dict{String,Any}(
+            "mean" => lmean, "sd" => lsd,
+            "q10" => lq10, "q50" => lq50, "q90" => lq90),
     )
     if !isempty(aug_params)
         augd = Dict{String,Any}()

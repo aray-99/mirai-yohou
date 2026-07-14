@@ -26,13 +26,16 @@
 #   --mu-gbar-sd: mu_gbar アンカリング prior の sd(変換空間、恒等なので
 #     logit 座標の sd と同義)。既定 0.2(仮。#0062 の事前選定プロトコル
 #     M10_prior_select.jl の結果を見て設定凍結で確定)。
-#   --instrument-g: g 計装診断(DECISIONS #0065/#0066)を有効化する。オリジン
-#     ごとに、(i) 同化窓: アンサンブル g(IX_G)と各 L3 拡大パラメータの
-#     メンバー平均・sd を各解析/再重み付けステップの前後で記録、(ii) 予報窓
-#     t_k〜t_k+1: 同統計の週次刻み軌道を予報アンサンブルから後処理抽出し、
-#     M10_instrument_g_<country>_t<t_k>[_smoke].json へ保存する(統計は内部
-#     リンク座標)。既定無効(読み取り専用、乱数消費・状態・重みへの副作用
-#     なし、判定数値不変)。
+#   --instrument-g: g 計装診断(DECISIONS #0065/#0066/#0067)を有効化する。
+#     オリジンごとに、(i) 同化窓: アンサンブル g(IX_G)・λ_e(IX_LAME)と各 L3
+#     拡大パラメータのメンバー平均・sd(λ_e はさらに分位点10/50/90%)を各
+#     解析/再重み付けステップの前後で記録、(ii) 予報窓 t_k〜t_k+1: 同統計の
+#     週次刻み軌道を予報アンサンブルから後処理抽出、(iii) 同化窓末尾(t_k)の
+#     λ_e 断面統計、(iv) 予報窓中のメンバー別内生ジャンプ発生数・累積 c_g·m
+#     (g 変化のジャンプ寄与、#0067)、(v) 同化窓内の強制ジャンプ時刻カタログ
+#     を、M10_instrument_g_<country>_t<t_k>[_smoke].json へ保存する(g/aug は
+#     内部リンク座標、λ_e は自然座標)。既定無効(読み取り専用、乱数消費・
+#     状態・重みへの副作用なし、判定数値不変)。
 
 include(joinpath(@__DIR__, "M9_walkforward.jl"))   # M8_calibrate.jl 等も連鎖 include 済み
 
@@ -60,13 +63,18 @@ end
 """
     write_g_diag(country, t_k, r, smoke, seed) -> String
 
-g 計装診断(DECISIONS #0065/#0066)を1オリジン分 JSON へ保存する
+g 計装診断(DECISIONS #0065/#0066/#0067)を1オリジン分 JSON へ保存する
 (オリジン別)。`r.g_diag`(`run_origin` が最終的に採用した同化ランの
-読み取り専用ログ。#0066 により各レコードに拡大パラメータ統計 "aug" を含む)
-と `r.g_diag_fore`(#0066、予報窓 t_k〜t_k+1 の週次刻み後処理系列
-`g_aug_series`)を来歴(コミット SHA・シード・生成日時)付きで書き出す。
-統計は全て内部リンク座標(g は logit、拡大パラメータは各レコードの "link"
-参照)。判定数値には一切関与しない診断専用の成果物。保存先パスを返す。
+読み取り専用ログ。#0066 により各レコードに拡大パラメータ統計 "aug"、#0067
+により λ_e 統計 "lame" を含む)と `r.g_diag_fore`(#0066/#0067、予報窓
+t_k〜t_k+1 の週次刻み後処理系列 `g_aug_series`、同じく "lame" 込み)を
+来歴(コミット SHA・シード・生成日時)付きで書き出す。加えて #0067 の
+ジャンプバースト仮説診断用に `r.lame_diag_tk`(同化窓末尾 t_k の λ_e 断面
+統計)・`r.jump_diag_fore`(予報窓のメンバー別ジャンプ発生数・累積 c_g·m)・
+`r.forced_jump_times_assim`(同化窓内の強制ジャンプ時刻カタログ)を保存する。
+統計は g/aug が内部リンク座標(g は logit、拡大パラメータは各レコードの
+"link" 参照)、λ_e(lame)は**自然座標**(≥0、log/logit 変換なし)。判定数値
+には一切関与しない診断専用の成果物。保存先パスを返す。
 """
 function write_g_diag(country::String, t_k::Real, r, smoke::Bool, seed::Integer)
     suffix = smoke ? "_smoke" : ""
@@ -75,10 +83,13 @@ function write_g_diag(country::String, t_k::Real, r, smoke::Bool, seed::Integer)
     out = Dict(
         "country" => country,
         "t_k" => Float64(t_k),
-        "design_decision" => "#0066",
-        "coordinates_note" => "all statistics in internal link coordinates: g = logit(g); augmented params per-record 'link' (log => log(natural value), identity => natural value)",
+        "design_decision" => "#0067",
+        "coordinates_note" => "g/aug statistics in internal link coordinates (g = logit(g); augmented params per-record 'link': log => log(natural value), identity => natural value). lame (lambda_e, IX_LAME) statistics are in NATURAL coordinates (>= 0, no log/logit transform - see src/coordinates.jl)",
         "g_diag" => r.g_diag,
         "g_diag_forecast" => r.g_diag_fore,
+        "lame_at_tk" => r.lame_diag_tk,
+        "jump_diag_forecast" => r.jump_diag_fore,
+        "forced_jump_times_assim" => r.forced_jump_times_assim,
         "provenance" => Dict(
             "commit" => strip(read(`git -C $(dirname(@__DIR__)) rev-parse HEAD`, String)),
             "seed" => seed,

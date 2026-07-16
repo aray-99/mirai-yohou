@@ -6,34 +6,36 @@
 # - ACLED は OAuth(password grant)で取得(ENV["ACLED_USERNAME"] /
 #   ["ACLED_PASSWORD"])。認証仕様と権限(Research access)の経緯は
 #   DECISIONS #0026 と https://github.com/aray-99/acled-client 参照。
-# - 出力: experiments/data/raw/<ISO3>_<var>.csv(year,value)+ 来歴サイドカー
+# - 出力: experiments/data/raw/<ISO3>_<file>.csv(year,value)+ 来歴サイドカー
 #   JSON(ソース URL・指標 ID・取得日時・API の lastupdated)。キャッシュ済み
 #   ファイルは再取得しない(force=true で上書き)。
 #
-# 実行: julia --project=experiments experiments/data/fetch_data.jl [--force]
+# 実行: julia --project=experiments experiments/data/fetch_data.jl [ISO3...] [--force]
 
 using Downloads
 using JSON3
 using Dates
 
-const RAW_DIR = joinpath(@__DIR__, "raw")
-const COUNTRIES = ["JPN", "THA"]                      # 日本・タイ(#0023)
+include(joinpath(@__DIR__, "country_config.jl"))
 
-# 変数 → World Bank 指標 ID(#0023。SWIID は手動ローダ、WB Gini は自動側)
+const RAW_DIR = joinpath(@__DIR__, "raw")
+
+# 変数 → World Bank 指標 ID・出力ファイル名(#0023。SWIID は手動ローダ、WB Gini は
+# 自動側)。:P だけ file="pop"(<ISO3>_pol.csv[分極度]との大小文字衝突回避、Issue #3)。
 const WB_INDICATORS = [
-    (:P, "SP.POP.TOTL"),          # 総人口
-    (:w, "SP.POP.1564.TO.ZS"),    # 生産年齢人口比率(%)
-    (:y, "NY.GDP.PCAP.KD"),       # 実質 GDP per capita(2015 USD、年次。四半期化は M8)
-    (:g, "SI.POV.GINI"),          # ジニ係数(疎。SWIID はローカルローダ側)
-    (:T_proxy, "IP.PAT.RESD"),    # 特許出願(居住者)
-    (:phi, "IT.NET.USER.ZS"),     # インターネット利用率(%)
-    (:v, "IT.CEL.SETS.P2"),       # モバイル契約 /100人
+    (:P, "SP.POP.TOTL", "pop"),           # 総人口
+    (:w, "SP.POP.1564.TO.ZS", "w"),       # 生産年齢人口比率(%)
+    (:y, "NY.GDP.PCAP.KD", "y"),          # 実質 GDP per capita(2015 USD、年次。四半期化は M8)
+    (:g, "SI.POV.GINI", "g"),             # ジニ係数(疎。SWIID はローカルローダ側)
+    (:T_proxy, "IP.PAT.RESD", "T_proxy"), # 特許出願(居住者)
+    (:phi, "IT.NET.USER.ZS", "phi"),      # インターネット利用率(%)
+    (:v, "IT.CEL.SETS.P2", "v"),          # モバイル契約 /100人
 ]
 
 function fetch_wb(country::String, indicator::String; force::Bool = false)
     mkpath(RAW_DIR)
-    var = first(name for (name, id) in WB_INDICATORS if id == indicator)
-    csvpath = joinpath(RAW_DIR, "$(country)_$(var).csv")
+    file = first(file for (_, id, file) in WB_INDICATORS if id == indicator)
+    csvpath = joinpath(RAW_DIR, "$(country)_$(file).csv")
     if isfile(csvpath) && !force
         println("cached: $csvpath")
         return csvpath
@@ -93,11 +95,11 @@ end
 
 """
 p(分極度)ローダ: V-Dem の政治分極指数(v2cacamps 等を 0〜1 に正規化)を
-手動で experiments/data/raw/<ISO3>_p.csv に置く。
+手動で experiments/data/raw/<ISO3>_pol.csv に置く。
 V-Dem は https://v-dem.net からデータセット(CSV)をダウンロード。
 """
 function load_p(country::String)
-    p = joinpath(RAW_DIR, "$(country)_p.csv")
+    p = joinpath(RAW_DIR, "$(country)_pol.csv")
     isfile(p) || error("$(p) がありません。V-Dem の分極指数系列を作成して置いてください(値は 0〜1)")
     return load_series(p)
 end
@@ -111,7 +113,6 @@ end
 
 const ACLED_TOKEN_URL = "https://acleddata.com/oauth/token"
 const ACLED_READ_URL = "https://acleddata.com/api/acled/read"
-const ACLED_COUNTRY = Dict("JPN" => "Japan", "THA" => "Thailand")
 const ACLED_FIELDS = ["event_id_cnty", "event_date", "year", "disorder_type",
                       "event_type", "sub_event_type", "admin1", "fatalities"]
 
@@ -147,15 +148,18 @@ ACLED イベント取得: 国別のイベント単位データ(event_date, event
 (エンバーゴ分はサーバ側で欠ける)。403 の場合はアカウント権限の問題
 (https://github.com/aray-99/acled-client/blob/main/TROUBLESHOOTING.md)。
 """
-function fetch_acled(country::String; force::Bool = false, year_from::Int = 2010)
+function fetch_acled(country::String; force::Bool = false,
+                     year_from::Union{Int, Nothing} = nothing)
     mkpath(RAW_DIR)
     csvpath = joinpath(RAW_DIR, "$(country)_events.csv")
     if isfile(csvpath) && !force
         println("cached: $csvpath")
         return csvpath
     end
+    cfg = load_country_config(country)
+    year_from = something(year_from, cfg["acled"]["year_from"])
     token = acled_token()
-    cname = ACLED_COUNTRY[country]
+    cname = cfg["name_en"]
     rows = Any[]
     page, limit = 1, 5000
     while true
@@ -194,7 +198,8 @@ end
 
 function main()
     force = "--force" in ARGS
-    for c in COUNTRIES, (var, id) in WB_INDICATORS
+    countries = country_args(ARGS)
+    for c in countries, (var, id, file) in WB_INDICATORS
         try
             fetch_wb(c, id; force)
         catch e
@@ -202,16 +207,16 @@ function main()
         end
     end
     println("\n-- 取得サマリ --")
-    for c in COUNTRIES, (var, _) in WB_INDICATORS
-        p = joinpath(RAW_DIR, "$(c)_$(var).csv")
+    for c in countries, (var, _, file) in WB_INDICATORS
+        p = joinpath(RAW_DIR, "$(c)_$(file).csv")
         if isfile(p)
             ys, vs = load_series(p)
-            println(rpad("$(c)_$(var)", 14), length(ys), " 点  ",
+            println(rpad("$(c)_$(file)", 14), length(ys), " 点  ",
                     isempty(ys) ? "" : "$(ys[1])–$(ys[end])")
         end
     end
     if haskey(ENV, "ACLED_USERNAME") && haskey(ENV, "ACLED_PASSWORD")
-        for c in COUNTRIES
+        for c in countries
             try
                 fetch_acled(c; force)
             catch e

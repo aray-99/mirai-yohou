@@ -6,9 +6,11 @@
 # を生成する。フィルタ・閾値はすべて引数であり、値の凍結は M8 の
 # DECISIONS エントリで行う(§9.1 は未承認のドラフト)。
 #
-# 実行(サマリ表示): julia --project=experiments experiments/data/prepare_events.jl
+# 実行(サマリ表示): julia --project=experiments experiments/data/prepare_events.jl [ISO3...]
 
 using Dates
+
+include(joinpath(@__DIR__, "country_config.jl"))
 
 const EVENTS_RAW_DIR = joinpath(@__DIR__, "raw")
 
@@ -35,8 +37,12 @@ function load_events(country::String)
     return events
 end
 
-"PHASE2_DESIGN §9.1 のドラフト既定: 深南部4県(タイの慢性反乱)"
-const DEEP_SOUTH_THA = ["Pattani", "Narathiwat", "Yala", "Songkhla"]
+"""
+PHASE2_DESIGN §9.1 のドラフト既定: 深南部4県(タイの慢性反乱)。
+一次ソースは countries/THA.toml(#0026/#0030)。M8_hindcast.jl の
+COUNTRY_CFG がこの定数を参照するため、TOML 由来の値のまま定数として残置する。
+"""
+const DEEP_SOUTH_THA = Vector{String}(load_country_config("THA")["acled"]["exclude_admin1"])
 
 """
 政治的騒乱イベントの抽出(§9.1 ドラフト既定)。
@@ -109,9 +115,11 @@ function summarize(country::String; exclude_admin1 = String[],
 end
 
 function main()
-    summarize("THA"; exclude_admin1 = DEEP_SOUTH_THA,
-              calib_from = Date(2010, 1, 1), calib_to = Date(2017, 12, 31))
-    summarize("JPN"; calib_from = Date(2018, 1, 1), calib_to = Date(2021, 12, 31))
+    for c in country_args(ARGS)
+        cfg = load_country_config(c)
+        summarize(c; exclude_admin1 = Vector{String}(cfg["acled"]["exclude_admin1"]),
+                 calib_from = cfg["acled"]["calib_from"], calib_to = cfg["acled"]["calib_to"])
+    end
 end
 
 abspath(PROGRAM_FILE) == (@__FILE__) && main()

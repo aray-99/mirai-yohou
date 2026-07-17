@@ -8,11 +8,13 @@
 #   R = (se × r_inflation)^2 として利用する。
 # - World Bank Gini(<ISO3>_g.csv、生・疎)は感度分析用に併存。
 #
-# 実行: julia --project=experiments experiments/data/extract_swiid_g.jl [--force]
+# 実行: julia --project=experiments experiments/data/extract_swiid_g.jl [ISO3...] [--force]
 
 using Downloads
 using JSON3
 using Dates
+
+include(joinpath(@__DIR__, "country_config.jl"))
 
 const RAW_DIR = joinpath(@__DIR__, "raw")
 const SCRATCH = joinpath(@__DIR__, "scratch")          # .gitignore 対象
@@ -20,7 +22,6 @@ const SWIID_DOI = "doi:10.7910/DVN/LM4OWF"
 const SWIID_VERSION = "9.92"
 const SWIID_DATAFILE_ID = 13657070                     # swiid9_92.zip
 const SWIID_URL = "https://dataverse.harvard.edu/api/access/datafile/$(SWIID_DATAFILE_ID)"
-const COUNTRIES = [("JPN", "Japan"), ("THA", "Thailand")]
 
 function swiid_summary_path()
     mkpath(SCRATCH)
@@ -39,14 +40,16 @@ end
 
 function main()
     force = "--force" in ARGS
-    targets = [joinpath(RAW_DIR, "$(iso)_g_swiid.csv") for (iso, _) in COUNTRIES]
+    countries = country_args(ARGS)
+    targets = [joinpath(RAW_DIR, "$(iso)_g_swiid.csv") for iso in countries]
     if all(isfile, targets) && !force
         foreach(p -> println("cached: $p"), targets)
         return
     end
     src = swiid_summary_path()
     mkpath(RAW_DIR)
-    for (iso, cname) in COUNTRIES
+    for iso in countries
+        cname = load_country_config(iso)["name_en"]
         rows = Tuple{Int, Float64, Float64}[]   # (year, gini_disp, se)
         for (i, line) in enumerate(eachline(src))
             i == 1 && continue

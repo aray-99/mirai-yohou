@@ -1,0 +1,9 @@
+# 国別データ設定(Issue #3)。書式は countries/README.md 参照。
+name_en = "Japan"    # ACLED / SWIID の英語国名
+regime = "stable"    # build_params レジーム(国別の科学的判断。新規国は要オーナー判断)
+
+[acled]
+year_from = 2010                # fetch_acled の取得開始年
+exclude_admin1 = []             # 国政レベル分析で除外する admin1(#0026/#0030)
+calib_from = 2018-01-01         # ジャンプカタログ較正期間(prepare_events サマリ)
+calib_to = 2021-12-31

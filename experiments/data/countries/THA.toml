@@ -1,0 +1,9 @@
+# 国別データ設定(Issue #3)。書式は countries/README.md 参照。
+name_en = "Thailand"    # ACLED / SWIID の英語国名
+regime = "volatile"     # build_params レジーム(国別の科学的判断。新規国は要オーナー判断)
+
+[acled]
+year_from = 2010                                                     # fetch_acled の取得開始年
+exclude_admin1 = ["Pattani", "Narathiwat", "Yala", "Songkhla"]        # 深南部4県(#0026/#0030)
+calib_from = 2010-01-01                                               # ジャンプカタログ較正期間(prepare_events サマリ)
+calib_to = 2017-12-31

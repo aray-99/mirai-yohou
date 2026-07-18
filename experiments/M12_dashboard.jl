@@ -19,18 +19,25 @@ using JSON3
 # 定数
 # ============================================================
 
-# 設計書 §3-3 の正典対応表(英語変数名 — 日本語ラベル)。一字一句厳守。
+# 設計書 §3-3 の正典対応表(英語変数名 — 日本語ラベル / English label)。
+# 日本語ラベルは一字一句厳守。英語ラベルは SPEC §3 の定義に忠実な訳とする
+# (#14: 独自の言い換え禁止)。
 const VARIABLE_LABELS = [
-    ("P", "総人口"),
-    ("w", "生産年齢人口比率(15-64歳)"),
-    ("y", "一人当たり産出(実質GDP/capita、合成観測)"),
-    ("g_swiid", "格差指標(可処分ジニ)"),
-    ("T_proxy", "技術フロンティア(特許出願が観測代理)"),
-    ("phi", "技術普及率(ネット利用率が観測代理)"),
-    ("v", "情報伝播速度(モバイル契約が観測代理)"),
-    ("tau", "制度信頼(WVS政府信頼)"),
-    ("p", "政治的分極度(V-Dem v2cacamps、高いほど分裂)"),
+    ("P", "総人口", "Total population"),
+    ("w", "生産年齢人口比率(15-64歳)", "Working-age population ratio (ages 15-64)"),
+    ("y", "一人当たり産出(実質GDP/capita、合成観測)", "Output per capita (real GDP per capita, composite observation)"),
+    ("g_swiid", "格差指標(可処分ジニ)", "Inequality index (disposable-income Gini)"),
+    ("T_proxy", "技術フロンティア(特許出願が観測代理)", "Technology frontier (patent applications as observation proxy)"),
+    ("phi", "技術普及率(ネット利用率が観測代理)", "Technology diffusion rate (internet usage as observation proxy)"),
+    ("v", "情報伝播速度(モバイル契約が観測代理)", "Information propagation speed (mobile subscriptions as observation proxy)"),
+    ("tau", "制度信頼(WVS政府信頼)", "Institutional trust (WVS government confidence)"),
+    ("p", "政治的分極度(V-Dem v2cacamps、高いほど分裂)", "Political polarization (V-Dem v2cacamps; higher = more polarized)"),
 ]
+
+# De は §3-3 の 9 系列表には含まれない診断変数(設計書 3-5「De 診断パネル」)。
+# SPEC §7 の正典用語(社会的デボラ数)に忠実な訳を UI 辞書として保持する。
+const DE_LABEL_JA = "体質診断(無次元)"
+const DE_LABEL_EN = "Social Deborah number (dimensionless)"
 
 const REQUIRED_TOP_KEYS = [
     :country, :regime, :N, :horizon_years, :forecast_start, :verified_horizon,
@@ -51,6 +58,26 @@ function html_escape(s::AbstractString)
     s = replace(s, ">" => "&gt;")
     s = replace(s, "\"" => "&quot;")
     return s
+end
+
+"""
+UI 文字列を JA/EN 両方 static に埋め込むヘルパー(#14: JA/EN トグル)。
+生成時点で両言語のテキストノードを埋め込み、表示切替はクライアント側 CSS/JS
+(`.i18n-ja` / `.i18n-en` + `html[data-lang]`)が担う。JS 無効環境では
+`.i18n-en` がデフォルトで非表示(CSS)のため、日本語主体の表示が保たれる
+(設計書冒頭のユーザー確認事項「UI言語 = 日本語主体」に合致)。
+"""
+function i18n_span(ja::AbstractString, en::AbstractString)
+    return """<span class="i18n-ja">$(html_escape(ja))</span><span class="i18n-en">$(html_escape(en))</span>"""
+end
+
+"""
+`i18n_span` の非エスケープ版。信頼できる静的 HTML 断片(`<code>` 等を含む
+免責注記の定数文字列)を埋め込む場合にのみ使う — 外部/JSON 由来の値には
+絶対に使わないこと。
+"""
+function i18n_span_raw(ja_html::AbstractString, en_html::AbstractString)
+    return """<span class="i18n-ja">$ja_html</span><span class="i18n-en">$en_html</span>"""
 end
 
 """数値を表示用に整形(整数はそのまま、浮動小数は有効桁を抑える)。"""
@@ -79,7 +106,7 @@ function validate_forecast_json(doc, path::AbstractString)
     if !isempty(missing_keys)
         error("JSON 検証失敗($path): トップレベルキー欠落 $(missing_keys)")
     end
-    for (name, _) in VARIABLE_LABELS
+    for (name, _, _) in VARIABLE_LABELS
         if !haskey(doc[:variables], Symbol(name))
             error("JSON 検証失敗($path): variables.$(name) が欠落")
         end
@@ -120,11 +147,21 @@ function render_header(countries::Vector{String}, docs::Dict{String,Any})
         for c in countries
     ], "\n      ")
 
+    title_i18n = i18n_span("未来予報 — 社会動態シミュレータ 将来予報", "Future Forecast — Social Dynamics Simulator")
+    nav_label_ja = html_escape("国切替")
+    nav_label_en = html_escape("Country switch")
+
     io = IOBuffer()
     print(io, """
     <header class="dashboard-header">
-      <h1>未来予報 — 社会動態シミュレータ 将来予報</h1>
-      <nav class="country-tabs" id="country-tabs" role="tablist" aria-label="国切替">
+      <div class="header-top">
+        <h1>$title_i18n</h1>
+        <div class="lang-toggle" role="group" data-aria-ja="UI言語" data-aria-en="UI language" aria-label="UI言語">
+          <button type="button" class="lang-btn" data-lang-option="ja" aria-pressed="true">JA</button>
+          <button type="button" class="lang-btn" data-lang-option="en" aria-pressed="false">EN</button>
+        </div>
+      </div>
+      <nav class="country-tabs" id="country-tabs" role="tablist" data-aria-ja="$nav_label_ja" data-aria-en="$nav_label_en" aria-label="$nav_label_ja">
       $tabs
       </nav>
       <div class="summary-line" id="summary-line" data-template="true">
@@ -137,7 +174,11 @@ function render_header(countries::Vector{String}, docs::Dict{String,Any})
 end
 
 function panel_footnote_variables()
-    return """<p class="panel-footnote">y=0 は予報起点断面(予報積分前のアンサンブル事後分布)であり、y=1 以降が実際の予報値である。</p>"""
+    text = i18n_span(
+        "y=0 は予報起点断面(予報積分前のアンサンブル事後分布)であり、y=1 以降が実際の予報値である。",
+        "y=0 is the forecast-origin cross-section (the ensemble posterior before forecast integration); y=1 onward are the actual forecast values.",
+    )
+    return """<p class="panel-footnote">$text</p>"""
 end
 
 function render_variable_table(country::String, varname::String, entry, years)
@@ -149,13 +190,17 @@ function render_variable_table(country::String, varname::String, entry, years)
     end
     unit = html_escape(string(entry[:unit]))
     last_obs = entry[:last_observation_year]
-    last_obs_str = last_obs === nothing ? "—(状態変数でない)" : string(last_obs)
+    last_obs_str = last_obs === nothing ? i18n_span("—(状態変数でない)", "— (not a state variable)") : string(last_obs)
+    table_view_label = i18n_span("表ビュー", "Table view")
+    unit_label = i18n_span("単位", "Unit")
+    last_obs_label = i18n_span("最終観測年", "Last observation year")
+    year_header = i18n_span("年", "Year")
     return """
         <details class="table-view">
-          <summary>表ビュー($(html_escape(varname)))</summary>
-          <p class="table-meta">単位: $unit / 最終観測年: $last_obs_str</p>
+          <summary>$table_view_label($(html_escape(varname)))</summary>
+          <p class="table-meta">$unit_label: $unit / $last_obs_label: $last_obs_str</p>
           <table>
-            <thead><tr><th>年</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
+            <thead><tr><th>$year_header</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
             <tbody>
             $(String(take!(rows)))
             </tbody>
@@ -164,14 +209,16 @@ function render_variable_table(country::String, varname::String, entry, years)
     """
 end
 
-function render_variable_panel(country::String, varname::String, label::String, entry, years)
+function render_variable_panel(country::String, varname::String, label_ja::String, label_en::String, entry, years)
     unit = string(entry[:unit])
     transform = string(entry[:transform])
     table = render_variable_table(country, varname, entry, years)
+    label_i18n = i18n_span(label_ja, label_en)
+    transform_label = i18n_span("変換", "Transform")
     return """
       <section class="panel variable-panel" data-country="$(html_escape(country))" data-variable="$(html_escape(varname))">
-        <h3>$(html_escape(varname)) — $(html_escape(label))($(html_escape(unit)))</h3>
-        <p class="panel-transform">変換: $(html_escape(transform))</p>
+        <h3>$(html_escape(varname)) — $label_i18n($(html_escape(unit)))</h3>
+        <p class="panel-transform">$transform_label: $(html_escape(transform))</p>
         <div class="svg-container" data-role="chart" data-variable="$(html_escape(varname))"></div>
         $table
       </section>
@@ -187,7 +234,11 @@ function render_count_forecast_panel(country::String, doc)
 
     badge = ""
     if get(jt, :p_ex_fallback, nothing) == "no_count_data"
-        badge = """<span class="warning-badge" role="status">⚠ ジャンプリスク評価不能(同化窓内にカウントデータなし)</span>"""
+        badge_text = i18n_span(
+            "⚠ ジャンプリスク評価不能(同化窓内にカウントデータなし)",
+            "⚠ Jump risk unassessable (no count data within assimilation window)",
+        )
+        badge = """<span class="warning-badge" role="status">$badge_text</span>"""
     end
 
     n = length(cf_years)
@@ -201,16 +252,21 @@ function render_count_forecast_panel(country::String, doc)
     r_hat = get(cf, :r_hat, nothing)
     r_hat_str = r_hat === nothing ? "Poisson" : fmt_num(r_hat)
 
+    title_i18n = i18n_span("期待騒乱イベント数 / 年", "Expected unrest event count / year")
+    unit_label = i18n_span("単位", "Unit")
+    table_view_label = i18n_span("表ビュー", "Table view")
+    year_header = i18n_span("年", "Year")
+
     return """
       <section class="panel count-forecast-panel" data-country="$(html_escape(country))">
-        <h3>期待騒乱イベント数 / 年 $badge</h3>
-        <p class="panel-note">単位: $(html_escape(string(get(cf, :unit, ""))))</p>
+        <h3>$title_i18n $badge</h3>
+        <p class="panel-note">$unit_label: $(html_escape(string(get(cf, :unit, ""))))</p>
         <p class="panel-footnote">nu_star = $nu_star / r_hat = $r_hat_str</p>
         <div class="svg-container" data-role="chart" data-variable="count_forecast"></div>
         <details class="table-view">
-          <summary>表ビュー(count_forecast)</summary>
+          <summary>$table_view_label(count_forecast)</summary>
           <table>
-            <thead><tr><th>年</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
+            <thead><tr><th>$year_header</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
             <tbody>
             $(String(take!(rows)))
             </tbody>
@@ -224,10 +280,15 @@ function render_de_panel(country::String, doc)
     entry = doc[:variables][:De]
     years = doc[:years]
     table = render_variable_table(country, "De", entry, years)
+    title_i18n = i18n_span(DE_LABEL_JA, DE_LABEL_EN)
+    footnote_i18n = i18n_span(
+        "De=1: 安定/変動レジーム境界。外挿領域では個別値でなくレジーム傾向(De の帯が 1 を跨ぐか)を読む。",
+        "De=1: boundary between stable and volatile regimes. In the extrapolated region, read the regime tendency (whether the De band crosses 1) rather than individual values.",
+    )
     return """
       <section class="panel de-panel" data-country="$(html_escape(country))">
-        <h3>De — 体質診断(無次元)</h3>
-        <p class="panel-footnote">De=1: 安定/変動レジーム境界。外挿領域では個別値でなくレジーム傾向(De の帯が 1 を跨ぐか)を読む。</p>
+        <h3>De — $title_i18n</h3>
+        <p class="panel-footnote">$footnote_i18n</p>
         <div class="svg-container" data-role="chart" data-variable="De"></div>
         $table
       </section>
@@ -251,9 +312,10 @@ function render_provenance_panel(country::String, doc)
         join(["$(k): $(v)" for (k, v) in pairs(fetched)], " / ")
     end
 
+    provenance_title = i18n_span("来歴", "Provenance")
     return """
       <section class="panel provenance-panel" data-country="$(html_escape(country))">
-        <h3>来歴</h3>
+        <h3>$provenance_title</h3>
         <dl class="provenance-list">
           <dt>commit</dt><dd title="$(html_escape(commit_full))">$(html_escape(commit_short))</dd>
           <dt>seed</dt><dd>$(fmt_opt(get(prov, :seed, nothing)))</dd>
@@ -274,23 +336,49 @@ function render_provenance_panel(country::String, doc)
     """
 end
 
-const DISCLAIMER_TEXT = """
-      <section class="panel disclaimer-panel">
-        <h3>免責注記</h3>
-        <p>
-          外挿領域(検証済みホライズンより先、y &gt; 6)の分位帯は、モデルの内生力学
+const DISCLAIMER_TITLE_I18N = i18n_span("免責注記", "Disclaimer")
+
+const DISCLAIMER_PARA_1_I18N = i18n_span_raw(
+    """外挿領域(検証済みホライズンより先、y &gt; 6)の分位帯は、モデルの内生力学
           (Hawkes 自己励起・OU 型緩和・L3 拡大パラメータの継続ランダムウォーク)のみに
-          基づく統計的投影であり、観測による制約を一切受けていない。
-        </p>
-        <p>
-          特に <code>p_ex_fallback: "no_count_data"</code> が発動している国・オリジンでは、
+          基づく統計的投影であり、観測による制約を一切受けていない。""",
+    """In the extrapolated region (beyond the verified horizon, y &gt; 6), the quantile
+          bands are a purely statistical projection driven by the model's endogenous
+          dynamics (Hawkes self-excitation, OU-type relaxation, ongoing random walk of
+          the L3 expansion parameter), unconstrained by any observation.""",
+)
+
+const DISCLAIMER_PARA_2_I18N = i18n_span_raw(
+    """特に <code>p_ex_fallback: "no_count_data"</code> が発動している国・オリジンでは、
           ジャンプ関連の力学(Γ 適用による急激な社会的応力上昇)が一切表現されないため、
           <code>count_forecast</code> は「ジャンプが起きない前提」の過小評価である
-          可能性がある。
+          可能性がある。""",
+    """In particular, for country/origin combinations where
+          <code>p_ex_fallback: "no_count_data"</code> is triggered, jump-related dynamics
+          (a sudden rise in social stress via Γ) are not represented at all, so
+          <code>count_forecast</code> may be an underestimate that assumes "no jumps
+          occur".""",
+)
+
+const DISCLAIMER_PARA_3_I18N = i18n_span_raw(
+    """検証の実証裏付けは M9/M10 の expanding-window walk-forward
+          (#0052 設計・#0069 合格判定)であり、検証済み範囲は起点+6年に限られる。""",
+    """The empirical basis for verification is the M9/M10 expanding-window walk-forward
+          (design #0052, pass verdict #0069), and the verified range is limited to
+          origin + 6 years.""",
+)
+
+const DISCLAIMER_TEXT = """
+      <section class="panel disclaimer-panel">
+        <h3>$DISCLAIMER_TITLE_I18N</h3>
+        <p>
+          $DISCLAIMER_PARA_1_I18N
         </p>
         <p>
-          検証の実証裏付けは M9/M10 の expanding-window walk-forward
-          (#0052 設計・#0069 合格判定)であり、検証済み範囲は起点+6年に限られる。
+          $DISCLAIMER_PARA_2_I18N
+        </p>
+        <p>
+          $DISCLAIMER_PARA_3_I18N
         </p>
       </section>
 """
@@ -312,9 +400,9 @@ function render_country_section(country::String, doc)
     """)
 
     print(io, """<div class="panel-grid">\n""")
-    for (varname, label) in VARIABLE_LABELS
+    for (varname, label_ja, label_en) in VARIABLE_LABELS
         entry = doc[:variables][Symbol(varname)]
-        print(io, render_variable_panel(country, varname, label, entry, doc[:years]))
+        print(io, render_variable_panel(country, varname, label_ja, label_en, entry, doc[:years]))
     end
     print(io, panel_footnote_variables())
     print(io, "</div>\n")
@@ -367,7 +455,31 @@ body {
   padding: 1rem 1.25rem;
   border-bottom: 1px solid var(--color-gridline);
 }
-.dashboard-header h1 { font-size: 1.25rem; margin: 0 0 0.5rem 0; }
+.dashboard-header h1 { font-size: 1.25rem; margin: 0; }
+.header-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+/* #14: JA/EN トグル。デフォルト(JS 無効・data-lang 未設定)は日本語主体表示。 */
+.i18n-en { display: none; }
+html[data-lang="en"] .i18n-ja { display: none; }
+html[data-lang="en"] .i18n-en { display: inline; }
+.lang-toggle { display: inline-flex; gap: 0.25rem; flex: none; }
+.lang-btn {
+  font: inherit;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--color-axis-line);
+  border-radius: 4px;
+  background: var(--color-panel-bg);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.lang-btn[aria-pressed="true"] { border-color: var(--color-series); font-weight: 600; }
 .country-tabs { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
 .country-tab {
   font: inherit;
@@ -452,9 +564,55 @@ const DASHBOARD_JS = """
 
   var VARIABLE_ORDER = ["P", "w", "y", "g_swiid", "T_proxy", "phi", "v", "tau", "p", "De"];
 
-  var CHART_WIDTH = 640;
-  var CHART_HEIGHT = 260;
+  // #15(案 a): viewBox をコンテナ実幅から動的決定する。CHART_WIDTH_DEFAULT/
+  // CHART_HEIGHT_DEFAULT はコンテナ幅が測定不能な場合(レイアウト前・非表示)の
+  // フォールバックのみに使う。アスペクト比はこの既定値を保つ。
+  var CHART_WIDTH_DEFAULT = 640;
+  var CHART_HEIGHT_DEFAULT = 260;
+  var CHART_ASPECT = CHART_HEIGHT_DEFAULT / CHART_WIDTH_DEFAULT;
+  var MIN_CHART_WIDTH = 160;
+  var AXIS_FONT_SIZE = "11px";
   var MARGIN = { top: 20, right: 16, bottom: 32, left: 60 };
+
+  // #14: チャート JS が直接生成するテキスト(生成器がデータ駆動で埋め込めない
+  // ラベル)の対訳辞書。生成 HTML 自体はどちらの言語でも同一(決定性を維持)で、
+  // 表示切替はここから読むランタイム値のみに依存する。
+  var STRINGS = {
+    ja: {
+      ariaChart: "予報ファンチャート",
+      verified: "検証済み",
+      extrapolated: "外挿",
+      boundaryLabel: "検証済み | 外挿",
+      deThresholdLabel: "De=1: 安定/変動レジーム境界",
+      regimePrefix: "regime: ",
+      tooltipYear: function (year, status) { return String(year) + "年(" + status + ")"; },
+      summaryLine: function (year, horizon, n) {
+        return "予報起点 " + year + " / ホライズン " + horizon + " 年 / N=" + n;
+      }
+    },
+    en: {
+      ariaChart: "Forecast fan chart",
+      verified: "Verified",
+      extrapolated: "Extrapolated",
+      boundaryLabel: "Verified | Extrapolated",
+      deThresholdLabel: "De=1: stable/volatile regime boundary",
+      regimePrefix: "regime: ",
+      tooltipYear: function (year, status) { return String(year) + " (" + status + ")"; },
+      summaryLine: function (year, horizon, n) {
+        return "Forecast start " + year + " / Horizon " + horizon + " years / N=" + n;
+      }
+    }
+  };
+  var LANG_STORAGE_KEY = "mirai-yohou-dashboard-lang";
+
+  function currentLang() {
+    var l = document.documentElement.getAttribute("data-lang");
+    return l === "en" ? "en" : "ja";
+  }
+
+  function t() {
+    return STRINGS[currentLang()];
+  }
 
   var renderedCountries = {};
 
@@ -528,21 +686,50 @@ const DASHBOARD_JS = """
     return [min - pad, max + pad];
   }
 
-  function makeScaleX(years) {
+  function makeScaleX(years, width) {
     var y0 = years[0], y1 = years[years.length - 1];
-    var x0 = MARGIN.left, x1 = CHART_WIDTH - MARGIN.right;
+    var x0 = MARGIN.left, x1 = width - MARGIN.right;
     var span = (y1 - y0) || 1;
     return function (year) {
       return x0 + ((year - y0) / span) * (x1 - x0);
     };
   }
 
-  function makeScaleY(domain) {
-    var y0 = MARGIN.top, y1 = CHART_HEIGHT - MARGIN.bottom;
+  function makeScaleY(domain, height) {
+    var y0 = MARGIN.top, y1 = height - MARGIN.bottom;
     var span = (domain[1] - domain[0]) || 1;
     return function (v) {
       return y1 - ((v - domain[0]) / span) * (y1 - y0);
     };
+  }
+
+  function measureContainerWidth(container) {
+    var w = container.getBoundingClientRect().width;
+    if (!w || w <= 0) return CHART_WIDTH_DEFAULT;
+    return Math.max(MIN_CHART_WIDTH, Math.round(w));
+  }
+
+  // #15(案 a): ResizeObserver でコンテナ幅の変化を検知し、しきい値(2px)を
+  // 超えたときのみ再描画する(サブピクセルの発火・再描画ループを避ける)。
+  function attachResponsiveRedraw(container, redraw) {
+    if (container._responsiveAttached) return;
+    container._responsiveAttached = true;
+    if (typeof ResizeObserver === "undefined") return;
+    var lastWidth = null;
+    var pending = false;
+    var ro = new ResizeObserver(function () {
+      if (pending) return;
+      pending = true;
+      window.requestAnimationFrame(function () {
+        pending = false;
+        var w = container.getBoundingClientRect().width;
+        if (w > 0 && (lastWidth === null || Math.abs(w - lastWidth) > 2)) {
+          lastWidth = w;
+          redraw();
+        }
+      });
+    });
+    ro.observe(container);
   }
 
   function buildPolygonPoints(years, upper, lower, scaleX, scaleY) {
@@ -586,23 +773,29 @@ const DASHBOARD_JS = """
     var untilYear = opts.untilYear;
     var threshold = opts.threshold;
 
+    // #15(案 a): viewBox をコンテナの実測幅から都度決定する。1 viewBox 単位が
+    // 実際の 1px に一致するため、font-size を実 px として指定でき、320px 幅の
+    // グリッド縮小パネルでも軸文字が AXIS_FONT_SIZE のまま読める。
+    var width = measureContainerWidth(container);
+    var height = Math.round(width * CHART_ASPECT);
+
     var extraForDomain = threshold ? [threshold.value] : [];
     var domain = computeYDomain(quantiles, extraForDomain);
-    var scaleX = makeScaleX(years);
-    var scaleY = makeScaleY(domain);
+    var scaleX = makeScaleX(years, width);
+    var scaleY = makeScaleY(domain, height);
 
     var svg = svgEl("svg", {
-      viewBox: "0 0 " + CHART_WIDTH + " " + CHART_HEIGHT,
+      viewBox: "0 0 " + width + " " + height,
       width: "100%",
       height: "auto",
       preserveAspectRatio: "xMidYMid meet",
       role: "img",
-      "aria-label": "予報ファンチャート",
+      "aria-label": t().ariaChart,
       "class": "chart-svg"
     });
 
-    var plotX0 = MARGIN.left, plotX1 = CHART_WIDTH - MARGIN.right;
-    var plotY0 = MARGIN.top, plotY1 = CHART_HEIGHT - MARGIN.bottom;
+    var plotX0 = MARGIN.left, plotX1 = width - MARGIN.right;
+    var plotY0 = MARGIN.top, plotY1 = height - MARGIN.bottom;
 
     var hasSplit = untilYear !== null && untilYear !== undefined &&
       untilYear > years[0] && untilYear < years[years.length - 1];
@@ -617,6 +810,17 @@ const DASHBOARD_JS = """
       svg.appendChild(wash);
     }
 
+    // しきい値線(De=1 等)のピクセル位置・ラベル位置を先に求めておく。近接する
+    // 通常の目盛はラベルを間引いて重なりを避ける(線自体が既にその値を示すため
+    // 目盛ラベルは冗長。ラベルは上端(境界ラベルの行)に来る場合だけ線の下に
+    // 逃がす — #15: 実 px フォント化で文字が大きくなった分、重なりが顕在化
+    // しやすいため)。
+    var thresholdY = threshold ? scaleY(threshold.value) : null;
+    var thresholdLabelY = threshold
+      ? ((thresholdY < (plotY0 + 16)) ? (thresholdY + 14) : (thresholdY - 4))
+      : null;
+    var tickRowHeight = (plotY1 - plotY0) / 4;
+
     var yTickValues = linspace(domain[0], domain[1], 5);
     yTickValues.forEach(function (v) {
       var yPix = scaleY(v);
@@ -626,9 +830,16 @@ const DASHBOARD_JS = """
         "class": "chart-gridline"
       });
       svg.appendChild(line);
+      var collidesThreshold = thresholdY !== null && (
+        Math.abs(yPix - thresholdY) < tickRowHeight * 0.6 ||
+        Math.abs(yPix - thresholdLabelY) < tickRowHeight * 0.6
+      );
+      if (collidesThreshold) {
+        return;
+      }
       var label = svgEl("text", {
         x: plotX0 - 6, y: yPix, "text-anchor": "end", "dominant-baseline": "middle",
-        style: "fill: var(--color-axis-label); font-size: 9px;",
+        style: "fill: var(--color-axis-label); font-size: " + AXIS_FONT_SIZE + ";",
         "class": "chart-axis-label"
       });
       label.textContent = formatAxisValue(v, unit);
@@ -645,7 +856,7 @@ const DASHBOARD_JS = """
       svg.appendChild(tick);
       var label = svgEl("text", {
         x: xPix, y: (plotY1 + 14), "text-anchor": "middle",
-        style: "fill: var(--color-axis-label); font-size: 9px;",
+        style: "fill: var(--color-axis-label); font-size: " + AXIS_FONT_SIZE + ";",
         "class": "chart-axis-label"
       });
       label.textContent = String(yr);
@@ -700,19 +911,21 @@ const DASHBOARD_JS = """
     }
 
     if (threshold) {
-      var ty = scaleY(threshold.value);
       var tline = svgEl("line", {
-        x1: plotX0, x2: plotX1, y1: ty, y2: ty,
+        x1: plotX0, x2: plotX1, y1: thresholdY, y2: thresholdY,
         style: "stroke: var(--color-axis-line); stroke-width: 1.5; stroke-dasharray: 5,4;",
         "class": "threshold-line"
       });
       svg.appendChild(tline);
       var tlabel = svgEl("text", {
-        x: plotX1, y: (ty - 4), "text-anchor": "end",
-        style: "fill: var(--color-text-secondary); font-size: 9px;",
+        x: plotX1, y: thresholdLabelY, "text-anchor": "end",
+        style: "fill: var(--color-text-secondary); font-size: " + AXIS_FONT_SIZE + ";",
         "class": "threshold-label"
       });
-      tlabel.textContent = threshold.label;
+      // 言語は opts に焼き込まず毎回 t() で読む(ResizeObserver の古いクロージャ経由の
+      // 再描画でも現在の言語設定を反映するため — opts.threshold.label に固定文字列を
+      // 持たせると、リサイズ再描画時に初回描画時点の言語のまま固まってしまう)。
+      tlabel.textContent = t().deThresholdLabel;
       svg.appendChild(tlabel);
     }
 
@@ -725,10 +938,10 @@ const DASHBOARD_JS = """
       svg.appendChild(boundaryLine);
       var boundaryLabel = svgEl("text", {
         x: boundaryX, y: (plotY0 - 6), "text-anchor": "middle",
-        style: "fill: var(--color-text-secondary); font-size: 9px;",
+        style: "fill: var(--color-text-secondary); font-size: " + AXIS_FONT_SIZE + ";",
         "class": "verified-boundary-label"
       });
-      boundaryLabel.textContent = "検証済み | 外挿";
+      boundaryLabel.textContent = t().boundaryLabel;
       svg.appendChild(boundaryLabel);
     }
 
@@ -770,7 +983,7 @@ const DASHBOARD_JS = """
     function handleMove(clientX, clientY) {
       var rect = svg.getBoundingClientRect();
       if (rect.width === 0) return;
-      var scale = CHART_WIDTH / rect.width;
+      var scale = width / rect.width;
       var px = (clientX - rect.left) * scale;
       var year = years[0] + ((px - plotX0) / (plotX1 - plotX0)) * (years[years.length - 1] - years[0]);
       var idx = nearestIndex(year);
@@ -785,18 +998,18 @@ const DASHBOARD_JS = """
       crosshairH.setAttribute("visibility", "visible");
 
       var status = (untilYear !== null && untilYear !== undefined && years[idx] <= untilYear)
-        ? "検証済み" : "外挿";
+        ? t().verified : t().extrapolated;
 
       var lines = [
-        (String(years[idx]) + "年(" + status + ")"),
+        t().tooltipYear(years[idx], status),
         ("q05: " + formatTooltipValue(quantiles.q05[idx], unit)),
         ("q25: " + formatTooltipValue(quantiles.q25[idx], unit)),
         ("q50: " + formatTooltipValue(quantiles.q50[idx], unit)),
         ("q75: " + formatTooltipValue(quantiles.q75[idx], unit)),
         ("q95: " + formatTooltipValue(quantiles.q95[idx], unit))
       ];
-      tooltip.innerHTML = lines.map(function (t) {
-        return ("<div>" + t.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</div>");
+      tooltip.innerHTML = lines.map(function (line) {
+        return ("<div>" + line.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</div>");
       }).join("");
       tooltip.style.display = "block";
 
@@ -834,6 +1047,10 @@ const DASHBOARD_JS = """
       ev.preventDefault();
     }, { passive: false });
     overlay.addEventListener("touchend", handleLeave);
+
+    attachResponsiveRedraw(container, function () {
+      renderFanChart(container, opts);
+    });
   }
 
   function renderCountryCharts(country, data) {
@@ -854,7 +1071,7 @@ const DASHBOARD_JS = """
         untilYear: untilYear
       };
       if (name === "De") {
-        opts.threshold = { value: 1, label: "De=1: 安定/変動レジーム境界" };
+        opts.threshold = { value: 1 };
       }
       renderFanChart(container, opts);
     });
@@ -872,28 +1089,33 @@ const DASHBOARD_JS = """
     }
   }
 
-  function selectCountry(country) {
-    var panels = document.querySelectorAll(".country-panel");
-    panels.forEach(function (p) {
-      p.hidden = p.getAttribute("data-country") !== country;
-    });
-    var tabs = document.querySelectorAll(".country-tab");
-    tabs.forEach(function (t) {
-      var isSel = t.getAttribute("data-country") === country;
-      t.setAttribute("aria-selected", isSel ? "true" : "false");
-    });
+  function updateSummaryLine(country) {
     var meta = document.querySelector(
       '.country-meta[data-country="' + country + '"]'
     );
     var badge = document.getElementById("regime-badge");
     var summary = document.getElementById("forecast-summary");
     if (meta && badge && summary) {
-      badge.textContent = "regime: " + meta.getAttribute("data-regime");
-      summary.textContent =
-        "予報起点 " + meta.getAttribute("data-forecast-start-year") +
-        " / ホライズン " + meta.getAttribute("data-horizon-years") + " 年" +
-        " / N=" + meta.getAttribute("data-n");
+      badge.textContent = t().regimePrefix + meta.getAttribute("data-regime");
+      summary.textContent = t().summaryLine(
+        meta.getAttribute("data-forecast-start-year"),
+        meta.getAttribute("data-horizon-years"),
+        meta.getAttribute("data-n")
+      );
     }
+  }
+
+  function selectCountry(country) {
+    var panels = document.querySelectorAll(".country-panel");
+    panels.forEach(function (p) {
+      p.hidden = p.getAttribute("data-country") !== country;
+    });
+    var tabs = document.querySelectorAll(".country-tab");
+    tabs.forEach(function (tabEl) {
+      var isSel = tabEl.getAttribute("data-country") === country;
+      tabEl.setAttribute("aria-selected", isSel ? "true" : "false");
+    });
+    updateSummaryLine(country);
     if (window.location.hash !== "#" + country) {
       window.location.hash = country;
     }
@@ -904,6 +1126,52 @@ const DASHBOARD_JS = """
         renderedCountries[country] = true;
       }
     }
+  }
+
+  // #14: JA/EN トグル。html[data-lang] 属性の付替えは CSS(.i18n-ja/.i18n-en)が
+  // 表示切替を担う。チャート SVG・サマリ行はテキストを直接生成するため、ここで
+  // 現在表示中の国のみ再描画してテキストを追従させる。
+  function applyLang(lang) {
+    document.documentElement.setAttribute("data-lang", lang);
+    document.documentElement.lang = lang;
+
+    document.querySelectorAll(".lang-btn").forEach(function (btn) {
+      var isSel = btn.getAttribute("data-lang-option") === lang;
+      btn.setAttribute("aria-pressed", isSel ? "true" : "false");
+    });
+
+    document.querySelectorAll("[data-aria-ja][data-aria-en]").forEach(function (el) {
+      el.setAttribute("aria-label", lang === "en" ? el.getAttribute("data-aria-en") : el.getAttribute("data-aria-ja"));
+    });
+
+    try {
+      window.localStorage.setItem(LANG_STORAGE_KEY, lang);
+    } catch (e) { /* localStorage 不可(private mode 等)— 保存は諦めて継続 */ }
+
+    // 描画キャッシュを破棄する: 非表示国のチャートは旧言語の SVG ラベル
+    // (境界・しきい値)を焼き込んだままなので、次に国切替されたとき
+    // selectCountry の遅延描画パスで現在の言語で再描画させる。表示中の国だけ
+    // ここで即時再描画する(ResizeObserver は幅不変だと再発火しないため、
+    // キャッシュ破棄なしでは切替後も旧言語が残る)。
+    renderedCountries = {};
+    var activePanel = document.querySelector(".country-panel:not([hidden])");
+    if (activePanel) {
+      var country = activePanel.getAttribute("data-country");
+      updateSummaryLine(country);
+      var data = readCountryData(country);
+      if (data) {
+        renderCountryCharts(country, data);
+        renderedCountries[country] = true;
+      }
+    }
+  }
+
+  function readStoredLang() {
+    try {
+      var stored = window.localStorage.getItem(LANG_STORAGE_KEY);
+      if (stored === "ja" || stored === "en") return stored;
+    } catch (e) { /* localStorage 不可 — 既定の ja にフォールバック */ }
+    return "ja";
   }
 
   function init() {
@@ -918,11 +1186,19 @@ const DASHBOARD_JS = """
       });
     });
 
+    document.querySelectorAll(".lang-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        applyLang(btn.getAttribute("data-lang-option"));
+      });
+    });
+
     var initial = window.location.hash
       ? window.location.hash.replace("#", "")
       : countries[0];
     if (countries.indexOf(initial) === -1) initial = countries[0];
     selectCountry(initial);
+
+    applyLang(readStoredLang());
   }
 
   if (document.readyState === "loading") {
@@ -973,6 +1249,15 @@ function build_dashboard_html(json_paths::Vector{String})
 
     header = render_header(countries, docs)
 
+    legend_1_i18n = i18n_span(
+        "90% 区間(q05–q95)/ 50% 区間(q25–q75)/ 中央値(q50)",
+        "90% interval (q05–q95) / 50% interval (q25–q75) / median (q50)",
+    )
+    legend_2_i18n = i18n_span(
+        "検証済み予報(起点+6年、#0052/#0069) と 外挿領域(不確実性の広がり)の区別(不透明度・背景ウォッシュ・境界ラベルで表現)",
+        "Distinction between verified forecast (origin + 6 years, #0052/#0069) and the extrapolated region (spread of uncertainty), expressed via opacity, background wash, and boundary label",
+    )
+
     html = """<!doctype html>
 <html lang="ja">
 <head>
@@ -993,7 +1278,7 @@ $header
       <rect x="0" y="4" width="48" height="8" style="fill: var(--color-series); fill-opacity: 0.32;"></rect>
       <line x1="0" y1="8" x2="48" y2="8" style="stroke: var(--color-series); stroke-width: 2;"></line>
     </svg>
-    <span>90% 区間(q05–q95)/ 50% 区間(q25–q75)/ 中央値(q50)</span>
+    <span>$legend_1_i18n</span>
   </div>
   <div class="legend-item">
     <svg class="legend-swatch" width="48" height="16" viewBox="0 0 48 16" aria-hidden="true">
@@ -1002,7 +1287,7 @@ $header
       <rect x="24" y="1" width="24" height="14" style="fill: var(--color-series); fill-opacity: 0.176;"></rect>
       <line x1="24" y1="0" x2="24" y2="16" style="stroke: var(--color-axis-line); stroke-width: 1; stroke-dasharray: 3,3;"></line>
     </svg>
-    <span>検証済み予報(起点+6年、#0052/#0069) と 外挿領域(不確実性の広がり)の区別(不透明度・背景ウォッシュ・境界ラベルで表現)</span>
+    <span>$legend_2_i18n</span>
   </div>
 </footer>
 <main>

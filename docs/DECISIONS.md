@@ -897,3 +897,16 @@
 - 完了条件(#0070 から不変): 新国の walk-forward が M10 凍結基準の要求帯内 + ダッシュボード反映。
 - 未確定事項(プロトコル外、診断ステップで決める): TUR の exclude_admin1 県リスト、各国の calib_from/to(データ交差を見て設定、手順 1 で提案 → 手順 2 の DECISIONS で確定)。
 - 関連: DECISIONS #0026 / #0030 / #0052 / #0063 / #0070。docs/PHASE3_DESIGN.md §4、候補国調査(2026-07-18 Sonnet 委譲、セッション記録)
+
+## [0078] KOR/TUR 紛争構造診断 — exclude_admin1・regime・較正窓の確定(Issue #19)
+
+- 日付: 2026-07-18(#0077 手順 2、Fable 診断・#0039 に基づく決定と事後報告)
+- データ: Issue #18 でコミットした ACLED 生データ(KOR 42,710 events / TUR 45,015 events、来歴サイドカー付き)の admin1 一次集計(全期間 + 較正窓 ≤2021)。
+- **TUR の診断**:
+  - 南東部・東部のクルド紛争(PKK)県に死者が極端に集中: 上位は Şırnak 24.8% / Hakkari 19.9% / Diyarbakır 11.1% / Mardin 8.2%。地理的に連続する 12 県(Sirnak, Hakkari, Diyarbakir, Mardin, Tunceli, Van, Siirt, Bitlis, Bingol, Agri, Batman, Mus — ACLED ASCII 表記)で**全期間死者の 85.7% をイベントシェア 31.1% で占める** — THA 深南部 4 県(85%、#0026/#0030)とほぼ同一の構造。
+  - 年次推移: 除外セット内は 2016=3,755 → 2017=2,399 → 逓減しつつ 2023 年まで持続(慢性)。除外後の残り(国政レベル)は 2016=734(クーデター未遂・大都市テロ = 正当な国政ジャンプ候補)→ 以降は年 2 桁 — 国政分析に適した系列になる。
+  - **決定**: exclude_admin1 = 上記 12 県。regime = volatile。較正窓 = 2016-01-01〜2021-12-31(制約要因: ACLED 開始年と WB 特許出願終了年 2021)。
+  - 感度の記録: 境界候補の Elazig(58)/ Kars(76)/ Erzurum(56)を加えてもシェアは +1.5% 未満で判定に影響しない。Hatay/Gaziantep/Sanliurfa(計 ~3%)はシリア紛争の越境波及でありメカニズムが異なるため除外しない(国政系列に残す)。
+- **KOR の診断**: 全期間死者 0(42,710 events 全て)。慢性地域紛争なし。イベントは Seoul 40.6% を筆頭とする抗議活動中心 = 国政そのもので除外不要。**決定**: exclude_admin1 = []。regime = stable。較正窓 = 2018-01-01〜2021-12-31(制約要因: ACLED 開始年と WB Gini/特許出願終了年 2021)。
+- 機構メモ: exclude_admin1 は fetch でなく下流(prepare_events / hindcast のロード時フィルタ)で適用されるため、コミット済み生 CSV は全国データのまま(来歴主義に整合)で、TOML 設定のみで有効化される。再取得は不要。
+- 関連: DECISIONS #0026 / #0030 / #0077。Issue #18 / #19、experiments/data/countries/{KOR,TUR}.toml

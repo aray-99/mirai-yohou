@@ -866,3 +866,16 @@
 - 手続きの記録: Pages 配信には main 反映が必要なため、公開資材の main マージ(030117f)→ Pages 有効化(ソース main /docs)→ URL 検証 → 本エントリ記録 → 最終 develop→main マージ + vM12 タグ、の 2 段マージとした(いずれも M12 完了処理の一部)。
 - フォローアップ(M12 スコープ外、起票済み): Issue #14/#15(sonnet-ok、友人委譲可)、#16(fable-required、デザインシステム導入 or デザイン特化エージェント刷新の比較検討)。#14/#15 マージ後の公開 HTML 再生成・再コミットはオーナーが実施(#0074 決定 5)。
 - 関連: DECISIONS #0039 / #0070 / #0071 / #0073 / #0074。Issue #11〜#16、docs/M12_DASHBOARD_DESIGN.md
+
+## [0076] 友人委譲の自動化 — GitHub Actions + @claude メンション体制
+
+- 日付: 2026-07-18(ユーザー承認済み計画に基づく事前記録、#0039)
+- 経緯: これまで友人(GitHub: Rodan-n、Claude Pro/Max 契約)への実装委譲は「ユーザーがメッセージアプリでプロンプトを転送し、友人が手動で自分の Claude Code に投入する」方式だった(M11 の PR #7〜#10 実績)。人間の中継が毎回必要で非効率のため、ユーザーの発案によりオーケストレーター(Fable)が GitHub 経由で友人側 Claude リソースへ直接タスクを割り振る体制へ移行する。
+- 決定内容:
+  1. **方式**: 公式 claude-code-action@v1 を採用。友人が `claude setup-token` で発行した OAuth トークン(Pro/Max サブスクリプション対応は公式 docs/setup.md で確認済み)をリポジトリ secrets `CLAUDE_CODE_OAUTH_TOKEN` に登録し、Issue/PR コメントへの `@claude` メンションで**友人のクォータで動く Claude が GitHub Actions 上で自動起動**し、ブランチ作成 → PR 作成まで行う。トークンは友人の同意に基づき提供され、友人はいつでも失効(再発行・revoke)できる。
+  2. **起動条件の制限(クォータ保護)**: 公開リポジトリのため、workflow の `if:` 条件で起動を `aray-99` / `Rodan-n` の発話に限定し、第三者コメントによる友人クォータの消費を防ぐ。加えて timeout-minutes と concurrency 制限を設定。secrets はフォーク由来 PR には渡らない(GitHub 標準挙動)。
+  3. **main 反映の例外**: `issue_comment` 系トリガーはデフォルトブランチ(main)上の workflow 定義を実行する GitHub 仕様のため、`.github/workflows/claude.yml` を含む本コミット群はマイルストーン完了時以外だが develop→main マージを行う(現時点で develop = main = 605d542 であり、差分はインフラ・ドキュメントのみ。実験成果物・凍結基準に非干渉)。#0039 に基づき事後報告。
+  4. **定常フロー**: ユーザー → Fable に依頼 → Fable が自己完結プロンプトの Issue を起票し `@claude` メンション → 友人クォータの Action が実装・PR 作成 → ユーザーが GitHub 通知で検知 → Fable が確立済み手順(checkout → diff 精査 → テスト自走 → --no-ff マージ)でレビュー。**PR の自動監視ループは回さない**(ユーザー決定、Pro クォータ節約)。
+  5. **初回実地テスト**: Issue #15(軸文字サイズ、sonnet-ok)を用いる。従来方式で友人に依頼済み想定のため、着手状況をユーザー経由で確認の上で実施。
+- 不変事項: レビュー・マージ権限はオーナー側のまま(凍結ファイル即差し戻し、公開 HTML 再生成はオーナー実施 = #0074 決定 5)。凍結基準・しきい値には触れない。Issue 本文を自己完結プロンプトとする起票流儀は維持。
+- 関連: DECISIONS #0039 / #0070 / #0075。Issue #14 / #15、.github/workflows/claude.yml、CLAUDE.md 運用節

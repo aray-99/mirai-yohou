@@ -20,6 +20,21 @@ Phase 2 設計は docs/PHASE2_DESIGN.md。
 - docs/SPEC.md・DECISIONS の全文読み込みをメインで行わない。必要箇所の抜粋を
   サブエージェントに取らせる。
 
+## 友人委譲(GitHub Actions + @claude、#0076)
+
+- 友人(GitHub: Rodan-n)への実装委譲は **Issue 起票 + `@claude` メンション**で行う。
+  `.github/workflows/claude.yml` が claude-code-action@v1 を起動し、友人のクォータ
+  (secrets.CLAUDE_CODE_OAUTH_TOKEN)で実装 → PR 作成まで自動実行される。
+  メッセージアプリでの人間中継は廃止。
+- 起票する Issue 本文は**自己完結プロンプト**にする(目的・対象ファイル・完了条件・
+  凍結ファイル不可侵・テスト方法を明記。Action 側は会話履歴を見えない)。
+- 起動は aray-99 / Rodan-n の発話のみ(第三者による友人クォータ消費の防止)。
+  無関係な Issue コメントに `@claude` を書かないこと。
+- Actions ランナーには Julia 環境がないため、**フルテストはオーナーがレビュー時に
+  実行**する(確立済み手順: checkout → diff 精査 → テスト自走 → --no-ff マージ)。
+- PR の自動監視ループは回さない(ユーザーが GitHub 通知で検知し、指示を受けて
+  Fable がレビューする)。
+
 ## セッション引き継ぎ(常時運用)
 
 - **セッション開始時は必ず HANDOVER_PROMPT.md(リポジトリ直下、未追跡)を読んで

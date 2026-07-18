@@ -924,3 +924,13 @@
 - **実行順と ETA**(実測: M10 で 15〜18 分/オリジン、較正 30〜60 分/国): ① KOR/TUR EKI 較正(逐次、計 1〜2h)→ ② オーナー検分・凍結 → ③ M10 walk-forward(KOR ≈2〜2.5h、TUR ≈1〜1.2h)→ ④ 判定(#0039 事後報告)。>30 分ランは全て setsid + 完了マーカーで切り離し([[mirai-yohou-long-run-protocol]])。
 - 付随コード変更(本エントリと同時コミット): KOR/TUR TOML への [hindcast]/acled_from 追記、M9_ORIGINS への KOR=>26:33 / TUR=>30:33 追加、M8_calibrate.jl --no-theta-sig フラグ、test_m8_hindcast_country_cfg.jl の期待値更新(KOR/TUR が確定国になるため)。
 - 関連: DECISIONS #0052 / #0055 / #0062 / #0063 / #0069 / #0077 / #0078。Issue #20
+
+## [0080] KOR/TUR EKI 較正値の凍結(Issue #20、#0079 手順②)
+
+- 日付: 2026-07-19(walk-forward 起動前に凍結、#0030-7 の流儀。結果を見た後の変更禁止)
+- 較正ラン: M8_calibrate.jl、J=24/iters=4/N=100、seed 20260710、コード 36f5675(#0079 凍結後)。KOR は --no-theta-sig(ΣN=0)、TUR は theta_sig 込み(#0079)。両国 exit=0。
+- 凍結値(M8_frozen_config.toml に追記):
+  - **KOR**(窓 [5,26]): eta_g 0.619 / delta_sig 0.126 / lam0 0.0191 / mu_gbar −0.712 / mu_p −0.863 / c_v0 3.22 / ν*=1.0(較正窓カウントなし)
+  - **TUR**(窓 [26,30]): eta_g 1.572 / delta_sig 0.0517 / lam0 0.260 / mu_gbar 0.136 / mu_p 0.312 / c_v0 2.97 / ν*=12.16
+- 検分所見: KOR は JPN 凍結値と高整合(eta_g 0.62/0.57、mu_gbar −0.71/−0.74、delta_sig 0.126/0.123、lam0 0.019/0.019)— JPN ミラー設計(#0079)の妥当性を支持。TUR は THA 比で高強度(eta_g 2.3 倍、lam0 2.7 倍、ν 2.9 倍)— PKK 除外後も高いイベント密度・過分散をもつ系列として整合的。
+- 関連: DECISIONS #0050 / #0079。experiments/output/M8_calib_{KOR,TUR}.json(来歴付き)

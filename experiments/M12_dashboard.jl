@@ -550,6 +550,7 @@ function build_dashboard_html(json_paths::Vector{String})
 <style>
 $DASHBOARD_CSS
 </style>
+<noscript><style>.country-panel[hidden] { display: block; }</style></noscript>
 </head>
 <body>
 $header

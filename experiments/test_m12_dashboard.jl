@@ -27,6 +27,9 @@ const BBB_PATH = joinpath(FIXTURE_DIR, "M11_forecast_BBB.json")
         html_one = build_dashboard_html([AAA_PATH])
         n_one = length(collect(eachmatch(r"<script type=\"application/json\" id=\"data-", html_one)))
         @test n_one == 1
+
+        # JS 無効環境の可読性(§4.3): hidden な国パネルを noscript で表示に戻す
+        @test occursin("<noscript><style>.country-panel[hidden]", html)
     end
 
     @testset "2. 決定性" begin

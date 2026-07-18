@@ -1,4 +1,4 @@
-# M12 予報円ダッシュボード 設計仕様(凍結: DECISIONS #0073)
+# M12 予報円ダッシュボード 設計仕様(凍結: DECISIONS #0073、是正: #0074)
 
 M11 将来予報 JSON(契約 = docs/FORECAST_JSON.md)を可視化する自己完結静的 HTML
 ダッシュボードの実装仕様。実装 Issue はすべて本書を規範とする。上位の枠組みは
@@ -42,11 +42,19 @@ M11 の予報 JSON(JPN/THA、horizon 30 年)をブラウザだけで閲覧でき
     (無ければ再生成コマンドを表示してエラー終了。FORECAST_JSON.md L8-19 参照)。
   - `--out` 省略時は `docs/dashboard/index.html`。出力ディレクトリは無ければ作成。
 - HTML/CSS/JS テンプレートは M12_dashboard.jl 内の文字列リテラルとして保持
-  (別ファイルに分けない — 「スクリプト1本」の凍結文言に従う)。生成器がやることは
-  (i) JSON 検証(トップレベルキーの存在確認)、(ii) 国ごとの JSON をそのまま
+  (別ファイルに分けない — 「スクリプト1本」の凍結文言に従う)。
+- **責務分割(#0074 で明確化)**: 生成器がやることは (i) JSON 検証(トップレベルキーの
+  存在確認)、(ii) 国ごとの JSON をそのまま
   `<script type="application/json" id="data-{ISO3}">` として埋め込み、(iii) 国リスト等の
-  マニフェストを `<script type="application/json" id="manifest">` に埋め込み。
-  **描画ロジックは持たない**(描画はクライアント側 JS)。
+  マニフェストを `<script type="application/json" id="manifest">` に埋め込み、
+  (iv) **データ駆動の静的 HTML の出力**: パネル見出し・警告バッジ(義務要件 (b))・
+  表ビュー・来歴パネル・免責注記は生成器が入力 JSON からレンダリングする。
+  クライアント側 JS が担うのは **SVG チャート描画とインタラクションのみ**。
+  この分割により、義務要件マーカーのテスト(§5-3)がデータ駆動で成立し、
+  JS 無効環境での可読性(§4.3)も保証される。
+- **生成コアは関数として公開する(#0074)**: 「入力 JSON パスの配列 → HTML 文字列」の
+  純関数とし、CLI(ISO3 引数 → experiments/output の規約パス解決)はその薄いラッパに
+  する。テストはフィクスチャパスでコア関数を直接呼ぶ。
 
 ### 2.2 決定性の規約
 
@@ -78,17 +86,22 @@ M11 の予報 JSON(JPN/THA、horizon 30 年)をブラウザだけで閲覧でき
 2. **凡例バー**(全パネル共通、1箇所のみ): 90% 区間(q05–q95)/ 50% 区間(q25–q75)/
    中央値(q50)の帯サンプル + 「検証済み予報(起点+6年、#0052/#0069)」「外挿領域
    (不確実性の広がり)」の区別サンプル。
-3. **9 実系列パネル**(グリッド、`variables` の P, w, y, g_swiid, T_proxy, phi, v, tau, p):
-   パネル題は「英語変数名 — 日本語ラベル(単位)」。日本語ラベルは
-   P=人口、w=労働分配率相当、y=一人当たり GDP、g_swiid=所得格差(可処分ジニ)、
-   T_proxy=技術(特許出願)、phi=政治参加、v=情報流通、tau=社会的信頼、p=政治的自由。
+3. **9 系列パネル**(グリッド、`variables` の P, w, y, g_swiid, T_proxy, phi, v, tau, p —
+   8 状態変数 + y は合成観測(SPEC §9.1 h_logy、状態には含まれない)):
+   パネル題は「英語変数名 — 日本語ラベル(単位)」。日本語ラベルは SPEC §3 の正典用語
+   (#0074 で是正。実装時に独自の言い換えをしないこと):
+   P=総人口、w=生産年齢人口比率(15-64歳)、y=一人当たり産出(実質 GDP/capita、合成観測)、
+   g_swiid=格差指標(可処分ジニ)、T_proxy=技術フロンティア(特許出願が観測代理)、
+   phi=技術普及率(ネット利用率が観測代理)、v=情報伝播速度(モバイル契約が観測代理)、
+   tau=制度信頼(WVS 政府信頼)、p=政治的分極度(V-Dem v2cacamps、高いほど分裂)。
    単位は JSON の `unit` を併記。y=0 が起点断面(予報積分前のアンサンブル事後)である
    旨をパネル群の脚注に1回記載。
 4. **count_forecast パネル**: 「期待騒乱イベント数 / 年」。x は予報年 y=1..horizon
    (配列長 horizon — variables と1つずれる点に注意、FORECAST_JSON.md L140-157)。
    `nu_star`・`r_hat`(null なら「Poisson」)を脚注表示。**義務要件 (b) のバッジは
    このパネルのヘッダに置く**(status 色 + ⚠ アイコン + テキスト。色のみで意味を
-   伝えない)。
+   伝えない)。バッジは生成器が静的 HTML として出力し、非発動国の HTML には
+   バッジ文字列そのものが存在しないこと(§2.1 の責務分割 — データ駆動)。
 5. **De 診断パネル**: 「De — 体質診断(無次元)」。De=1 のしきい線(破線 + ラベル
    「De=1: 安定/変動レジーム境界」)。外挿領域の主提示物として、パネル脚注に
    「外挿領域では個別値でなくレジーム傾向(De の帯が 1 を跨ぐか)を読む」旨を記載。
@@ -147,14 +160,21 @@ CSS カスタムプロパティで定義し、`@media (prefers-color-scheme: dar
   検証済み/外挿の別。タッチ環境ではタップで同等表示。
 - 国切替: タブクリックで全パネルを対象国の埋め込み JSON から再描画。
   URL ハッシュ(`#THA`)に反映し、ロード時に復元(デフォルトは manifest 先頭)。
-- 各パネルに `<details>` の**表ビュー**(年 × 5 分位の table)— アクセシビリティ
-  要件。JS 無効環境でも表ビューと来歴・免責テキストは読めること
-  (SVG は JS 必須で可)。
+- 各パネルに `<details>` の**表ビュー**(年 × 5 分位の table。生成器が静的 HTML と
+  して出力 — §2.1 の責務分割)— アクセシビリティ要件。JS 無効環境でも表ビュー・
+  警告バッジ・来歴・免責テキストは読めること(SVG チャートのみ JS 必須で可)。
 
-## 5. テスト(Julia テストスイートに追加)
+## 5. テスト(experiments スタンドアロン形式。#0074 で是正)
 
-フィクスチャ: 実出力を縮約した小 JSON(horizon 5 年・2 か国相当、
-`p_ex_fallback: "no_count_data"` の国を 1 つ含む)を `test/fixtures/` にコミット。
+生成器は experiments 環境の JSON3 等に依存するため、メインスイート
+(test/runtests.jl)には追加せず、**`experiments/test_m12_dashboard.jl`** の
+スタンドアロンテストとする(test_m8_augmentation.jl / test_m10_prior.jl の
+確立済み流儀)。実行: `julia --project=experiments experiments/test_m12_dashboard.jl`。
+テストは生成コア関数(§2.1)をフィクスチャパスで直接呼ぶ。
+
+フィクスチャ: 実出力を縮約した小 JSON(horizon 5 年・2 か国相当、うち 1 か国は
+`jump_thinning.p_ex_fallback = "no_count_data"`。国コードは実在国と衝突しない
+架空 ISO3(AAA/BBB 等)を使う)を `experiments/test_fixtures/` にコミット。
 
 1. **生成成功**: フィクスチャ入力で HTML が生成され、サイズ > 0、
    `<script type="application/json"` が国数分存在。
@@ -179,5 +199,16 @@ CSS カスタムプロパティで定義し、`@media (prefers-color-scheme: dar
 1. 完了条件 1〜3(§1)を実 URL で確認
 2. 義務要件 (a)(b) を DOM / 表示で確認((b) はフィクスチャ HTML で確認)
 3. 決定性: `M11_forecast_{JPN,THA}.json` から 2 回生成してバイト一致
-4. フルテスト green(`julia --project -e 'using Pkg; Pkg.test()'`)
+4. フルテスト green(`julia --project -e 'using Pkg; Pkg.test()'`)+
+   スタンドアロンテスト green(`julia --project=experiments experiments/test_m12_dashboard.jl`)
 5. Artifact プレビューで表示崩れ・ラベル衝突の目視確認(ライト/ダーク両方)
+
+補足(Issue C の作業メモ):
+
+- Pages 設定時に `docs/.nojekyll` を配置する(Jekyll 処理によるアンダースコア始まり
+  パスの除外・md 変換の副作用を回避)。
+- **公開 HTML の正典入力**: `docs/dashboard/index.html` にコミットする実データ HTML は、
+  オーナー環境の正典 JSON(2026-07-17 生成、seed 20260711)から生成する。実装者
+  (Issue A/B)はフィクスチャで完結し、実データ HTML の生成・コミットはオーナーが
+  PR レビュー時に行う(provenance の commit SHA・generated_at が実行環境ごとに
+  揺れるのを防ぐ)。

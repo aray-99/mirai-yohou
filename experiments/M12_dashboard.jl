@@ -407,7 +407,23 @@ main { padding: 1rem 1.25rem; }
   font-size: 0.8rem;
   margin: 0.15rem 0;
 }
-.svg-container { min-height: 2rem; }
+.svg-container { min-height: 2rem; position: relative; }
+.chart-svg { width: 100%; height: auto; display: block; }
+.chart-overlay { cursor: crosshair; }
+.chart-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--color-panel-bg);
+  border: 1px solid var(--color-axis-line);
+  border-radius: 4px;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.72rem;
+  line-height: 1.3;
+  color: var(--color-text-primary);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+  z-index: 5;
+  white-space: nowrap;
+}
 .warning-badge {
   display: inline-block;
   background: var(--color-warning);
@@ -426,11 +442,21 @@ details.table-view summary { cursor: pointer; color: var(--color-text-secondary)
 .provenance-list dd { margin: 0; word-break: break-word; }
 .disclaimer-panel p { font-size: 0.85rem; line-height: 1.5; }
 footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary); font-size: 0.8rem; }
+.legend-item { display: flex; align-items: center; gap: 0.4rem; margin: 0.2rem 0; }
+.legend-swatch { flex: none; vertical-align: middle; }
 """
 
 const DASHBOARD_JS = """
 (function () {
   "use strict";
+
+  var VARIABLE_ORDER = ["P", "w", "y", "g_swiid", "T_proxy", "phi", "v", "tau", "p", "De"];
+
+  var CHART_WIDTH = 640;
+  var CHART_HEIGHT = 260;
+  var MARGIN = { top: 20, right: 16, bottom: 32, left: 60 };
+
+  var renderedCountries = {};
 
   function readManifest() {
     var el = document.getElementById("manifest");
@@ -442,6 +468,408 @@ const DASHBOARD_JS = """
     var el = document.getElementById("data-" + country);
     if (!el) return null;
     return JSON.parse(el.textContent);
+  }
+
+  function svgEl(name, attrs) {
+    var el = document.createElementNS("http://www.w3.org/2000/svg", name);
+    if (attrs) {
+      for (var k in attrs) {
+        if (Object.prototype.hasOwnProperty.call(attrs, k)) {
+          el.setAttribute(k, attrs[k]);
+        }
+      }
+    }
+    return el;
+  }
+
+  function isFractionLikeUnit(unit) {
+    if (!unit) return false;
+    return unit.indexOf("fraction") !== -1 || unit.indexOf("dimensionless") !== -1;
+  }
+
+  function formatAxisValue(v, unit) {
+    if (isFractionLikeUnit(unit)) return v.toFixed(2);
+    var abs = Math.abs(v);
+    if (abs >= 1e9) return (v / 1e9).toFixed(1) + "G";
+    if (abs >= 1e6) return (v / 1e6).toFixed(1) + "M";
+    if (abs >= 1e3) return (v / 1e3).toFixed(1) + "k";
+    if (abs >= 10) return v.toFixed(0);
+    return v.toFixed(2);
+  }
+
+  function formatTooltipValue(v, unit) {
+    if (isFractionLikeUnit(unit)) return v.toFixed(3);
+    return formatAxisValue(v, unit);
+  }
+
+  function linspace(a, b, n) {
+    var out = [];
+    if (n === 1) { out.push(a); return out; }
+    var step = (b - a) / (n - 1);
+    for (var i = 0; i < n; i++) out.push(a + step * i);
+    return out;
+  }
+
+  function computeYDomain(quantiles, extraValues) {
+    var min = Infinity, max = -Infinity;
+    ["q05", "q25", "q50", "q75", "q95"].forEach(function (key) {
+      (quantiles[key] || []).forEach(function (v) {
+        if (v < min) min = v;
+        if (v > max) max = v;
+      });
+    });
+    (extraValues || []).forEach(function (v) {
+      if (v < min) min = v;
+      if (v > max) max = v;
+    });
+    if (!isFinite(min) || !isFinite(max)) { min = 0; max = 1; }
+    if (min === max) { min -= 1; max += 1; }
+    var pad = (max - min) * 0.05;
+    return [min - pad, max + pad];
+  }
+
+  function makeScaleX(years) {
+    var y0 = years[0], y1 = years[years.length - 1];
+    var x0 = MARGIN.left, x1 = CHART_WIDTH - MARGIN.right;
+    var span = (y1 - y0) || 1;
+    return function (year) {
+      return x0 + ((year - y0) / span) * (x1 - x0);
+    };
+  }
+
+  function makeScaleY(domain) {
+    var y0 = MARGIN.top, y1 = CHART_HEIGHT - MARGIN.bottom;
+    var span = (domain[1] - domain[0]) || 1;
+    return function (v) {
+      return y1 - ((v - domain[0]) / span) * (y1 - y0);
+    };
+  }
+
+  function buildPolygonPoints(years, upper, lower, scaleX, scaleY) {
+    var pts = [];
+    var i;
+    for (i = 0; i < years.length; i++) {
+      pts.push(scaleX(years[i]) + "," + scaleY(upper[i]));
+    }
+    for (i = years.length - 1; i >= 0; i--) {
+      pts.push(scaleX(years[i]) + "," + scaleY(lower[i]));
+    }
+    return pts.join(" ");
+  }
+
+  function buildLinePoints(years, values, scaleX, scaleY) {
+    var pts = [];
+    for (var i = 0; i < years.length; i++) {
+      pts.push(scaleX(years[i]) + "," + scaleY(values[i]));
+    }
+    return pts.join(" ");
+  }
+
+  function xTicks(years) {
+    var y0 = years[0], y1 = years[years.length - 1];
+    var start = Math.ceil(y0 / 5) * 5;
+    var ticks = [];
+    for (var y = start; y <= y1; y += 5) ticks.push(y);
+    if (ticks.length === 0) { ticks.push(y0); ticks.push(y1); }
+    return ticks;
+  }
+
+  function clearContainer(container) {
+    while (container.firstChild) container.removeChild(container.firstChild);
+  }
+
+  function renderFanChart(container, opts) {
+    clearContainer(container);
+    var years = opts.years;
+    var quantiles = opts.quantiles;
+    var unit = opts.unit || "";
+    var untilYear = opts.untilYear;
+    var threshold = opts.threshold;
+
+    var extraForDomain = threshold ? [threshold.value] : [];
+    var domain = computeYDomain(quantiles, extraForDomain);
+    var scaleX = makeScaleX(years);
+    var scaleY = makeScaleY(domain);
+
+    var svg = svgEl("svg", {
+      viewBox: "0 0 " + CHART_WIDTH + " " + CHART_HEIGHT,
+      width: "100%",
+      height: "auto",
+      preserveAspectRatio: "xMidYMid meet",
+      role: "img",
+      "aria-label": "予報ファンチャート",
+      "class": "chart-svg"
+    });
+
+    var plotX0 = MARGIN.left, plotX1 = CHART_WIDTH - MARGIN.right;
+    var plotY0 = MARGIN.top, plotY1 = CHART_HEIGHT - MARGIN.bottom;
+
+    var hasSplit = untilYear !== null && untilYear !== undefined &&
+      untilYear > years[0] && untilYear < years[years.length - 1];
+    var boundaryX = hasSplit ? scaleX(untilYear) : null;
+
+    if (hasSplit) {
+      var wash = svgEl("rect", {
+        x: boundaryX, y: plotY0, width: (plotX1 - boundaryX), height: (plotY1 - plotY0),
+        style: "fill: var(--color-gridline); fill-opacity: 0.5;",
+        "class": "extrapolation-wash"
+      });
+      svg.appendChild(wash);
+    }
+
+    var yTickValues = linspace(domain[0], domain[1], 5);
+    yTickValues.forEach(function (v) {
+      var yPix = scaleY(v);
+      var line = svgEl("line", {
+        x1: plotX0, x2: plotX1, y1: yPix, y2: yPix,
+        style: "stroke: var(--color-gridline); stroke-width: 1;",
+        "class": "chart-gridline"
+      });
+      svg.appendChild(line);
+      var label = svgEl("text", {
+        x: plotX0 - 6, y: yPix, "text-anchor": "end", "dominant-baseline": "middle",
+        style: "fill: var(--color-axis-label); font-size: 9px;",
+        "class": "chart-axis-label"
+      });
+      label.textContent = formatAxisValue(v, unit);
+      svg.appendChild(label);
+    });
+
+    var xt = xTicks(years);
+    xt.forEach(function (yr) {
+      var xPix = scaleX(yr);
+      var tick = svgEl("line", {
+        x1: xPix, x2: xPix, y1: plotY1, y2: (plotY1 + 4),
+        style: "stroke: var(--color-axis-line); stroke-width: 1;"
+      });
+      svg.appendChild(tick);
+      var label = svgEl("text", {
+        x: xPix, y: (plotY1 + 14), "text-anchor": "middle",
+        style: "fill: var(--color-axis-label); font-size: 9px;",
+        "class": "chart-axis-label"
+      });
+      label.textContent = String(yr);
+      svg.appendChild(label);
+    });
+
+    var uid = "clip-" + Math.random().toString(36).slice(2, 10);
+    var defs = svgEl("defs");
+    var clipVerified = svgEl("clipPath", { id: (uid + "-verified") });
+    clipVerified.appendChild(svgEl("rect", {
+      x: plotX0, y: plotY0,
+      width: (hasSplit ? (boundaryX - plotX0) : (plotX1 - plotX0)),
+      height: (plotY1 - plotY0)
+    }));
+    var clipExtrapolated = svgEl("clipPath", { id: (uid + "-extrapolated") });
+    clipExtrapolated.appendChild(svgEl("rect", {
+      x: (hasSplit ? boundaryX : plotX1), y: plotY0,
+      width: (hasSplit ? (plotX1 - boundaryX) : 0),
+      height: (plotY1 - plotY0)
+    }));
+    defs.appendChild(clipVerified);
+    defs.appendChild(clipExtrapolated);
+    svg.appendChild(defs);
+
+    var band90Points = buildPolygonPoints(years, quantiles.q95, quantiles.q05, scaleX, scaleY);
+    var band50Points = buildPolygonPoints(years, quantiles.q75, quantiles.q25, scaleX, scaleY);
+    var linePoints = buildLinePoints(years, quantiles.q50, scaleX, scaleY);
+
+    function buildDataGroup(clipId, opacityFactor) {
+      var g = svgEl("g", { "clip-path": ("url(#" + clipId + ")") });
+      g.appendChild(svgEl("polygon", {
+        points: band90Points,
+        style: ("fill: var(--color-series); fill-opacity: " + (0.16 * opacityFactor) + "; stroke: none;"),
+        "class": "chart-band-90"
+      }));
+      g.appendChild(svgEl("polygon", {
+        points: band50Points,
+        style: ("fill: var(--color-series); fill-opacity: " + (0.32 * opacityFactor) + "; stroke: none;"),
+        "class": "chart-band-50"
+      }));
+      g.appendChild(svgEl("polyline", {
+        points: linePoints,
+        style: ("fill: none; stroke: var(--color-series); stroke-width: 2; stroke-opacity: " + opacityFactor + ";"),
+        "class": "chart-median-line"
+      }));
+      return g;
+    }
+
+    svg.appendChild(buildDataGroup((uid + "-verified"), 1));
+    if (hasSplit) {
+      svg.appendChild(buildDataGroup((uid + "-extrapolated"), 0.55));
+    }
+
+    if (threshold) {
+      var ty = scaleY(threshold.value);
+      var tline = svgEl("line", {
+        x1: plotX0, x2: plotX1, y1: ty, y2: ty,
+        style: "stroke: var(--color-axis-line); stroke-width: 1.5; stroke-dasharray: 5,4;",
+        "class": "threshold-line"
+      });
+      svg.appendChild(tline);
+      var tlabel = svgEl("text", {
+        x: plotX1, y: (ty - 4), "text-anchor": "end",
+        style: "fill: var(--color-text-secondary); font-size: 9px;",
+        "class": "threshold-label"
+      });
+      tlabel.textContent = threshold.label;
+      svg.appendChild(tlabel);
+    }
+
+    if (hasSplit) {
+      var boundaryLine = svgEl("line", {
+        x1: boundaryX, x2: boundaryX, y1: plotY0, y2: plotY1,
+        style: "stroke: var(--color-axis-line); stroke-width: 1; stroke-dasharray: 3,3;",
+        "class": "verified-boundary"
+      });
+      svg.appendChild(boundaryLine);
+      var boundaryLabel = svgEl("text", {
+        x: boundaryX, y: (plotY0 - 6), "text-anchor": "middle",
+        style: "fill: var(--color-text-secondary); font-size: 9px;",
+        "class": "verified-boundary-label"
+      });
+      boundaryLabel.textContent = "検証済み | 外挿";
+      svg.appendChild(boundaryLabel);
+    }
+
+    var crosshairH = svgEl("line", {
+      x1: plotX0, x2: plotX1, y1: 0, y2: 0,
+      style: "stroke: var(--color-axis-line); stroke-width: 1;",
+      visibility: "hidden", "class": "crosshair-h"
+    });
+    var crosshairV = svgEl("line", {
+      x1: 0, x2: 0, y1: plotY0, y2: plotY1,
+      style: "stroke: var(--color-axis-line); stroke-width: 1;",
+      visibility: "hidden", "class": "crosshair-v"
+    });
+    svg.appendChild(crosshairH);
+    svg.appendChild(crosshairV);
+
+    var overlay = svgEl("rect", {
+      x: plotX0, y: plotY0, width: (plotX1 - plotX0), height: (plotY1 - plotY0),
+      style: "fill: transparent;", "class": "chart-overlay"
+    });
+    svg.appendChild(overlay);
+
+    container.appendChild(svg);
+
+    var tooltip = document.createElement("div");
+    tooltip.className = "chart-tooltip";
+    tooltip.style.display = "none";
+    container.appendChild(tooltip);
+
+    function nearestIndex(year) {
+      var best = 0, bestDist = Infinity;
+      for (var i = 0; i < years.length; i++) {
+        var d = Math.abs(years[i] - year);
+        if (d < bestDist) { bestDist = d; best = i; }
+      }
+      return best;
+    }
+
+    function handleMove(clientX, clientY) {
+      var rect = svg.getBoundingClientRect();
+      if (rect.width === 0) return;
+      var scale = CHART_WIDTH / rect.width;
+      var px = (clientX - rect.left) * scale;
+      var year = years[0] + ((px - plotX0) / (plotX1 - plotX0)) * (years[years.length - 1] - years[0]);
+      var idx = nearestIndex(year);
+      var xPix = scaleX(years[idx]);
+      var yPix = scaleY(quantiles.q50[idx]);
+
+      crosshairV.setAttribute("x1", xPix);
+      crosshairV.setAttribute("x2", xPix);
+      crosshairV.setAttribute("visibility", "visible");
+      crosshairH.setAttribute("y1", yPix);
+      crosshairH.setAttribute("y2", yPix);
+      crosshairH.setAttribute("visibility", "visible");
+
+      var status = (untilYear !== null && untilYear !== undefined && years[idx] <= untilYear)
+        ? "検証済み" : "外挿";
+
+      var lines = [
+        (String(years[idx]) + "年(" + status + ")"),
+        ("q05: " + formatTooltipValue(quantiles.q05[idx], unit)),
+        ("q25: " + formatTooltipValue(quantiles.q25[idx], unit)),
+        ("q50: " + formatTooltipValue(quantiles.q50[idx], unit)),
+        ("q75: " + formatTooltipValue(quantiles.q75[idx], unit)),
+        ("q95: " + formatTooltipValue(quantiles.q95[idx], unit))
+      ];
+      tooltip.innerHTML = lines.map(function (t) {
+        return ("<div>" + t.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</div>");
+      }).join("");
+      tooltip.style.display = "block";
+
+      var containerRect = container.getBoundingClientRect();
+      var relX = clientX - containerRect.left;
+      var relY = clientY - containerRect.top;
+      var tooltipLeft = relX + 12;
+      if (containerRect.width > 0 && (tooltipLeft + 150) > containerRect.width) {
+        tooltipLeft = relX - 150;
+      }
+      tooltip.style.left = tooltipLeft + "px";
+      tooltip.style.top = Math.max(0, (relY - 20)) + "px";
+    }
+
+    function handleLeave() {
+      crosshairV.setAttribute("visibility", "hidden");
+      crosshairH.setAttribute("visibility", "hidden");
+      tooltip.style.display = "none";
+    }
+
+    overlay.addEventListener("mousemove", function (ev) {
+      handleMove(ev.clientX, ev.clientY);
+    });
+    overlay.addEventListener("mouseleave", handleLeave);
+    overlay.addEventListener("touchstart", function (ev) {
+      if (ev.touches && ev.touches.length > 0) {
+        handleMove(ev.touches[0].clientX, ev.touches[0].clientY);
+      }
+      ev.preventDefault();
+    }, { passive: false });
+    overlay.addEventListener("touchmove", function (ev) {
+      if (ev.touches && ev.touches.length > 0) {
+        handleMove(ev.touches[0].clientX, ev.touches[0].clientY);
+      }
+      ev.preventDefault();
+    }, { passive: false });
+    overlay.addEventListener("touchend", handleLeave);
+  }
+
+  function renderCountryCharts(country, data) {
+    var panel = document.querySelector('.country-panel[data-country="' + country + '"]');
+    if (!panel || !data) return;
+    var years = data.years;
+    var untilYear = data.verified_horizon ? data.verified_horizon.until_calendar_year : null;
+
+    VARIABLE_ORDER.forEach(function (name) {
+      var entry = data.variables && data.variables[name];
+      if (!entry) return;
+      var container = panel.querySelector('.svg-container[data-variable="' + name + '"]');
+      if (!container) return;
+      var opts = {
+        years: years,
+        quantiles: { q05: entry.q05, q25: entry.q25, q50: entry.q50, q75: entry.q75, q95: entry.q95 },
+        unit: entry.unit,
+        untilYear: untilYear
+      };
+      if (name === "De") {
+        opts.threshold = { value: 1, label: "De=1: 安定/変動レジーム境界" };
+      }
+      renderFanChart(container, opts);
+    });
+
+    var cfContainer = panel.querySelector('.svg-container[data-variable="count_forecast"]');
+    if (cfContainer && data.count_forecast) {
+      var cfYears = years.slice(1);
+      var cf = data.count_forecast;
+      renderFanChart(cfContainer, {
+        years: cfYears,
+        quantiles: { q05: cf.q05, q25: cf.q25, q50: cf.q50, q75: cf.q75, q95: cf.q95 },
+        unit: cf.unit,
+        untilYear: untilYear
+      });
+    }
   }
 
   function selectCountry(country) {
@@ -469,9 +897,13 @@ const DASHBOARD_JS = """
     if (window.location.hash !== "#" + country) {
       window.location.hash = country;
     }
-    // SVG チャート描画は Issue #12 で実装する(ここでは器のみ)。
-    var data = readCountryData(country);
-    void data;
+    if (!renderedCountries[country]) {
+      var data = readCountryData(country);
+      if (data) {
+        renderCountryCharts(country, data);
+        renderedCountries[country] = true;
+      }
+    }
   }
 
   function init() {
@@ -555,11 +987,23 @@ $DASHBOARD_CSS
 <body>
 $header
 <footer class="legend-bar">
-  <p>
-    凡例: 90% 区間(q05–q95)/ 50% 区間(q25–q75)/ 中央値(q50)。
-    検証済み予報(起点+6年、#0052/#0069)と外挿領域(不確実性の広がり)は
-    パネル内チャートで区別する(SVG 描画は Issue #12 で実装)。
-  </p>
+  <div class="legend-item">
+    <svg class="legend-swatch" width="48" height="16" viewBox="0 0 48 16" aria-hidden="true">
+      <rect x="0" y="1" width="48" height="14" style="fill: var(--color-series); fill-opacity: 0.16;"></rect>
+      <rect x="0" y="4" width="48" height="8" style="fill: var(--color-series); fill-opacity: 0.32;"></rect>
+      <line x1="0" y1="8" x2="48" y2="8" style="stroke: var(--color-series); stroke-width: 2;"></line>
+    </svg>
+    <span>90% 区間(q05–q95)/ 50% 区間(q25–q75)/ 中央値(q50)</span>
+  </div>
+  <div class="legend-item">
+    <svg class="legend-swatch" width="48" height="16" viewBox="0 0 48 16" aria-hidden="true">
+      <rect x="0" y="1" width="24" height="14" style="fill: var(--color-series); fill-opacity: 0.32;"></rect>
+      <rect x="24" y="1" width="24" height="14" style="fill: var(--color-gridline); fill-opacity: 0.5;"></rect>
+      <rect x="24" y="1" width="24" height="14" style="fill: var(--color-series); fill-opacity: 0.176;"></rect>
+      <line x1="24" y1="0" x2="24" y2="16" style="stroke: var(--color-axis-line); stroke-width: 1; stroke-dasharray: 3,3;"></line>
+    </svg>
+    <span>検証済み予報(起点+6年、#0052/#0069) と 外挿領域(不確実性の広がり)の区別(不透明度・背景ウォッシュ・境界ラベルで表現)</span>
+  </div>
 </footer>
 <main>
 $country_sections

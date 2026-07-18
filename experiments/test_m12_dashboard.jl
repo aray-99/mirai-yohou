@@ -48,10 +48,16 @@ const BBB_PATH = joinpath(FIXTURE_DIR, "M11_forecast_BBB.json")
         html_aaa_only = build_dashboard_html([AAA_PATH])
         @test !occursin("ジャンプリスク評価不能", html_aaa_only)
 
-        # (a) 検証済み/外挿の境界ラベル等、チャート(SVG)側のマーカーは
-        # Issue #12(実描画)のスコープ。ここではテストの置き場所のみ確保する。
-        @test_skip occursin("外挿", html_both) && occursin("検証済み", html_both)
-        # ↑ Issue #12 で SVG チャート境界ラベルを実装した際に有効化する。
+        # (a) 検証済み/外挿の視覚区別(Issue #12 実装分)。
+        # クライアント側 JS テンプレートに境界実装のマーカー(クラス名・ラベル文字列)が
+        # 含まれること、および data-until-calendar-year 属性がフィクスチャの
+        # verified_horizon.until_calendar_year 値(2028)で出力されていることを検査する。
+        @test occursin("外挿", html_both)
+        @test occursin("検証済み", html_both)
+        @test occursin("verified-boundary", html_both)
+        @test occursin("検証済み | 外挿", html_both)
+        @test occursin("外挿領域(不確実性の広がり)", html_both)
+        @test occursin("data-until-calendar-year=\"2028\"", html_both)
     end
 
     @testset "4. 埋め込み忠実性" begin

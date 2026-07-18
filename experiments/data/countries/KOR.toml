@@ -1,0 +1,15 @@
+# 国別データ設定(Issue #3、M13 #0077)。書式は countries/README.md 参照。
+name_en = "South Korea"    # ACLED / WB の英語国名
+swiid_name_en = "Korea"    # SWIID の国名表記が異なるための上書き(#0077)
+# regime は仮値(#0077 手順2: KORは除外不要見込みだがACLED集計で確認予定、Issue #19待ち)
+regime = "stable"     # build_params レジーム(国別の科学的判断。新規国は要オーナー判断)
+
+[acled]
+year_from = 2018                # fetch_acled の取得開始年(公式カバレッジ表、#0077)
+# exclude_admin1 は仮値(#0077: KORは地域紛争なし見込み。Issue #19の一次集計で確認後に確定)
+exclude_admin1 = []
+# calib_from/to はデータ交差(WB g 2006-2021 × ACLED 2018- × V-Dem 1990-2025 ×
+# SWIID 1965-2024)の重なりから提案。制約要因は ACLED 開始年(2018)と WB Gini/
+# 特許出願の終了年(2021)。確定は#0077手順2の DECISIONS で(fable-required)。
+calib_from = 2018-01-01
+calib_to = 2021-12-31

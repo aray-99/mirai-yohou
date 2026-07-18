@@ -1,0 +1,15 @@
+# 国別データ設定(Issue #3、M13 #0077)。書式は countries/README.md 参照。
+name_en = "Turkey"    # ACLED / SWIID の英語国名
+# regime は仮値(#0077 手順2: PKK紛争構造の診断待ち、Issue #19)
+regime = "volatile"     # build_params レジーム(国別の科学的判断。新規国は要オーナー判断)
+
+[acled]
+year_from = 2016                # fetch_acled の取得開始年(公式カバレッジ表、#0077)
+# exclude_admin1 は仮値(#0077: PKK紛争は南東部県に地理的限定。Issue #19の一次集計で確定)
+exclude_admin1 = []
+# calib_from/to はデータ交差(WB 特許出願 1980-2021 × ACLED 2016- × V-Dem
+# 1990-2025 × SWIID 1987-2025)の重なりから提案。制約要因は ACLED 開始年
+# (2016)と WB 特許出願の終了年(2021)。確定は#0077手順2の DECISIONS で
+# (fable-required)。
+calib_from = 2016-01-01
+calib_to = 2021-12-31

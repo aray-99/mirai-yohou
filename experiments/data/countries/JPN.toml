@@ -3,7 +3,12 @@ name_en = "Japan"    # ACLED / SWIID の英語国名
 regime = "stable"    # build_params レジーム(国別の科学的判断。新規国は要オーナー判断)
 
 [acled]
-year_from = 2010                # fetch_acled の取得開始年
+year_from = 2010                # fetch_acled の取得開始年(リクエスト下限。実データ範囲は acled_from 参照)
 exclude_admin1 = []             # 国政レベル分析で除外する admin1(#0026/#0030)
+acled_from = 2018-01-01         # 実カバレッジ開始日(ACLED は year_from=2010 でも実データはここから。#0022)
 calib_from = 2018-01-01         # ジャンプカタログ較正期間(prepare_events サマリ)
 calib_to = 2021-12-31
+
+[hindcast]                      # M8 ヒンドキャストの較正/検証ウィンドウ(1990年起点の年。#0030-4/#0077)
+calib_t = [5.0, 26.0]
+verif_t = [26.0, 35.0]

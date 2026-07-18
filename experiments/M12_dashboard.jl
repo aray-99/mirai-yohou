@@ -1148,12 +1148,21 @@ const DASHBOARD_JS = """
       window.localStorage.setItem(LANG_STORAGE_KEY, lang);
     } catch (e) { /* localStorage 不可(private mode 等)— 保存は諦めて継続 */ }
 
+    // 描画キャッシュを破棄する: 非表示国のチャートは旧言語の SVG ラベル
+    // (境界・しきい値)を焼き込んだままなので、次に国切替されたとき
+    // selectCountry の遅延描画パスで現在の言語で再描画させる。表示中の国だけ
+    // ここで即時再描画する(ResizeObserver は幅不変だと再発火しないため、
+    // キャッシュ破棄なしでは切替後も旧言語が残る)。
+    renderedCountries = {};
     var activePanel = document.querySelector(".country-panel:not([hidden])");
     if (activePanel) {
       var country = activePanel.getAttribute("data-country");
       updateSummaryLine(country);
       var data = readCountryData(country);
-      if (data) renderCountryCharts(country, data);
+      if (data) {
+        renderCountryCharts(country, data);
+        renderedCountries[country] = true;
+      }
     }
   }
 

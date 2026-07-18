@@ -96,6 +96,24 @@ M11 の予報 JSON(JPN/THA、horizon 30 年)をブラウザだけで閲覧でき
    tau=制度信頼(WVS 政府信頼)、p=政治的分極度(V-Dem v2cacamps、高いほど分裂)。
    単位は JSON の `unit` を併記。y=0 が起点断面(予報積分前のアンサンブル事後)である
    旨をパネル群の脚注に1回記載。
+
+   **JA/EN 対訳表(Issue #14 で追記。一字一句厳守 — 実装時の独自の言い換えを禁止)**:
+   日本語ラベルは本節冒頭の正典表記そのもの。英語ラベルは SPEC §3 の定義に忠実な訳。
+
+   | 変数 | 日本語ラベル(正典) | English label |
+   |---|---|---|
+   | P | 総人口 | Total population |
+   | w | 生産年齢人口比率(15-64歳) | Working-age population ratio (ages 15-64) |
+   | y | 一人当たり産出(実質GDP/capita、合成観測) | Output per capita (real GDP per capita, composite observation) |
+   | g_swiid | 格差指標(可処分ジニ) | Inequality index (disposable-income Gini) |
+   | T_proxy | 技術フロンティア(特許出願が観測代理) | Technology frontier (patent applications as observation proxy) |
+   | phi | 技術普及率(ネット利用率が観測代理) | Technology diffusion rate (internet usage as observation proxy) |
+   | v | 情報伝播速度(モバイル契約が観測代理) | Information propagation speed (mobile subscriptions as observation proxy) |
+   | tau | 制度信頼(WVS政府信頼) | Institutional trust (WVS government confidence) |
+   | p | 政治的分極度(V-Dem v2cacamps、高いほど分裂) | Political polarization (V-Dem v2cacamps; higher = more polarized) |
+
+   De(§3-5、9 系列表には含まれない診断変数)も同基準で対訳する:
+   De = 体質診断(無次元) / Social Deborah number (dimensionless)(SPEC §7 の正典用語)。
 4. **count_forecast パネル**: 「期待騒乱イベント数 / 年」。x は予報年 y=1..horizon
    (配列長 horizon — variables と1つずれる点に注意、FORECAST_JSON.md L140-157)。
    `nu_star`・`r_hat`(null なら「Poisson」)を脚注表示。**義務要件 (b) のバッジは

@@ -55,6 +55,21 @@ include(joinpath(@__DIR__, "M8_hindcast.jl"))
         @test occursin("Issue #20", err.msg)
         @test occursin("[hindcast]", err.msg)
     end
+
+    @testset "country_cfg: 実在する未確定国(KOR)も同じ明確なエラー" begin
+        # countries/KOR.toml は実在するが [hindcast] 未確定(Issue #20 待ち)。
+        # COUNTRY_CFG からは除外され(include は成功する)、参照時に
+        # KeyError でなく build_country_cfg の明確なエラーになること。
+        @test !haskey(COUNTRY_CFG, "KOR")
+        err = try
+            country_cfg("KOR")
+            nothing
+        catch e
+            e
+        end
+        @test err isa ErrorException
+        @test occursin("Issue #20", err.msg)
+    end
 end
 
 println("OK: COUNTRY_CFG TOML 駆動ローダ回帰テスト green")

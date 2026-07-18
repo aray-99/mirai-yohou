@@ -29,13 +29,16 @@ using MiraiYohou: N_STATE, member_seed, run_assimilation, free_ensemble,
 include(joinpath(@__DIR__, "M8_calibrate.jl"))   # M8_hindcast.jl も連鎖 include 済み
 
 """
-国別オリジン列(年次、#0052): JPN t=26..33(8本)、THA t=28..33(6本)。
+国別オリジン列(年次、#0052): JPN t=26..33(8本)、THA t=28..33(6本)、
+KOR t=26..33(8本、JPN ミラー)、TUR t=30..33(4本)— KOR/TUR は #0079 で凍結。
 窓開始(expanding の左端)は `COUNTRY_CFG[country].calib[1]` を流用する
-(JPN t=5 / THA t=20、M8 較正窓の開始と同じ)。
+(JPN/KOR t=5 / THA t=20 / TUR t=26、M8 較正窓の開始と同じ)。
 """
 const M9_ORIGINS = Dict(
     "JPN" => collect(26:33),
     "THA" => collect(28:33),
+    "KOR" => collect(26:33),
+    "TUR" => collect(30:33),
 )
 
 const M9_HORIZON = 1.0    # 1年先予報(#0052)

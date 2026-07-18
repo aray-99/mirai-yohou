@@ -910,3 +910,17 @@
 - **KOR の診断**: 全期間死者 0(42,710 events 全て)。慢性地域紛争なし。イベントは Seoul 40.6% を筆頭とする抗議活動中心 = 国政そのもので除外不要。**決定**: exclude_admin1 = []。regime = stable。較正窓 = 2018-01-01〜2021-12-31(制約要因: ACLED 開始年と WB Gini/特許出願終了年 2021)。
 - 機構メモ: exclude_admin1 は fetch でなく下流(prepare_events / hindcast のロード時フィルタ)で適用されるため、コミット済み生 CSV は全国データのまま(来歴主義に整合)で、TOML 設定のみで有効化される。再取得は不要。
 - 関連: DECISIONS #0026 / #0030 / #0077。Issue #18 / #19、experiments/data/countries/{KOR,TUR}.toml
+
+## [0079] M13-C 実行プロトコル凍結 — KOR/TUR のヒンドキャストウィンドウ・オリジン・EKI 設定(Issue #20)
+
+- 日付: 2026-07-19(ラン起動前の事前凍結、#0039/#0030-7 の流儀)
+- 入力: tau 転記(ユーザー、d487c2f)+ パイプライン仕様調査(Explore 委譲)。ブロッカー 3 点([hindcast] 未確定 / M9_ORIGINS 未登録 / M8_frozen_config 未凍結)を本エントリで解消する。
+- **ヒンドキャストウィンドウ(科学的判断)**:
+  - **KOR**: calib_t = [5.0, 26.0](1995〜2016)、verif_t = [26.0, 35.0]、オリジン 26:33(8 個)— **JPN の完全ミラー**。根拠: 同型レジーム(stable・低烈度)、ACLED 開始 2018 も同一(較正窓カバレッジゼロ、検証窓中盤から)。acled_from = 2018-01-01。
+  - **TUR**: calib_t = [26.0, 30.0](2016〜2020)、verif_t = [30.0, 35.0]、オリジン 30:33(4 個)— **THA 型(較正窓を ACLED カバレッジに整合)**。根拠: volatile 国はカウント尤度が較正の主情報源(THA 前例)。較正窓に 2016-17 PKK ピークと 2016 クーデター未遂(除外後国政系列のジャンプ)を含めジャンプカタログを成立させる。検証オリジン 4 個は THA(6)より少ない — ACLED 実カバー 9 年の制約として記録し、プール判定の n 減少を承知の上で #0052 帯を不変更で適用。acled_from = 2016-01-01。
+- **EKI 較正**: M8_calibrate.jl を公式設定 **J=24 / iters=4 / N=100**(#0069 と同一)で国別に明示実行(pipeline の calibrate 段は既定 J16 のため使わない)。シードはソース既定 20260710(JPN/THA 公式較正と同一)。結果 JSON をオーナーが検分し M8_frozen_config.toml に凍結(#0050 流儀)。
+- **theta_sig の較正時扱い(#0055 の ΣN≥50 規則に整合)**: 較正窓のフィルタ後週次カウント ΣN で判定 — **KOR = 除外**(較正窓 [5,26) は ACLED カバレッジ外で ΣN=0。JPN と同条件)、**TUR = 含める**(較正窓 2016-2020 の除外後イベント数千件 ≥50。THA と同条件)。M8_calibrate.jl の CLI 既定(country != "JPN")は JPN 固有ハックのため、後方互換の `--no-theta-sig` フラグを追加して KOR 較正時に明示指定する(関数既定・JPN/THA 経路は不変更)。
+- **walk-forward**: M10_walkforward.jl(#0062 prior 規則、--mu-gbar-sd 0.3、シード既定 20260711、オリジン別再較正 J24/iters4/N100)。合格判定は **#0052 基準セット不変更**(基準1 プール被覆 0.80–0.98 / 基準2 RMSE 過半 / 基準3 NegBin logL / 基準4 テスト green、是正上限 2 回 #0070)。
+- **実行順と ETA**(実測: M10 で 15〜18 分/オリジン、較正 30〜60 分/国): ① KOR/TUR EKI 較正(逐次、計 1〜2h)→ ② オーナー検分・凍結 → ③ M10 walk-forward(KOR ≈2〜2.5h、TUR ≈1〜1.2h)→ ④ 判定(#0039 事後報告)。>30 分ランは全て setsid + 完了マーカーで切り離し([[mirai-yohou-long-run-protocol]])。
+- 付随コード変更(本エントリと同時コミット): KOR/TUR TOML への [hindcast]/acled_from 追記、M9_ORIGINS への KOR=>26:33 / TUR=>30:33 追加、M8_calibrate.jl --no-theta-sig フラグ、test_m8_hindcast_country_cfg.jl の期待値更新(KOR/TUR が確定国になるため)。
+- 関連: DECISIONS #0052 / #0055 / #0062 / #0063 / #0069 / #0077 / #0078。Issue #20

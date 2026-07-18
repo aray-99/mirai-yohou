@@ -40,7 +40,31 @@ body {
   padding: 1rem 1.25rem;
   border-bottom: 1px solid var(--color-gridline);
 }
-.dashboard-header h1 { font-size: 1.25rem; margin: 0 0 0.5rem 0; }
+.dashboard-header h1 { font-size: 1.25rem; margin: 0; }
+.header-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+/* #14: JA/EN トグル。デフォルト(JS 無効・data-lang 未設定)は日本語主体表示。 */
+.i18n-en { display: none; }
+html[data-lang="en"] .i18n-ja { display: none; }
+html[data-lang="en"] .i18n-en { display: inline; }
+.lang-toggle { display: inline-flex; gap: 0.25rem; flex: none; }
+.lang-btn {
+  font: inherit;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--color-axis-line);
+  border-radius: 4px;
+  background: var(--color-panel-bg);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.lang-btn[aria-pressed="true"] { border-color: var(--color-series); font-weight: 600; }
 .country-tabs { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
 .country-tab {
   font: inherit;
@@ -123,8 +147,14 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
 </head>
 <body>
 <header class="dashboard-header">
-  <h1>未来予報 — 社会動態シミュレータ 将来予報</h1>
-  <nav class="country-tabs" id="country-tabs" role="tablist" aria-label="国切替">
+  <div class="header-top">
+    <h1><span class="i18n-ja">未来予報 — 社会動態シミュレータ 将来予報</span><span class="i18n-en">Future Forecast — Social Dynamics Simulator</span></h1>
+    <div class="lang-toggle" role="group" data-aria-ja="UI言語" data-aria-en="UI language" aria-label="UI言語">
+      <button type="button" class="lang-btn" data-lang-option="ja" aria-pressed="true">JA</button>
+      <button type="button" class="lang-btn" data-lang-option="en" aria-pressed="false">EN</button>
+    </div>
+  </div>
+  <nav class="country-tabs" id="country-tabs" role="tablist" data-aria-ja="国切替" data-aria-en="Country switch" aria-label="国切替">
   <button type="button" class="country-tab" data-country="JPN">JPN</button>
       <button type="button" class="country-tab" data-country="THA">THA</button>
   </nav>
@@ -141,7 +171,7 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
       <rect x="0" y="4" width="48" height="8" style="fill: var(--color-series); fill-opacity: 0.32;"></rect>
       <line x1="0" y1="8" x2="48" y2="8" style="stroke: var(--color-series); stroke-width: 2;"></line>
     </svg>
-    <span>90% 区間(q05–q95)/ 50% 区間(q25–q75)/ 中央値(q50)</span>
+    <span><span class="i18n-ja">90% 区間(q05–q95)/ 50% 区間(q25–q75)/ 中央値(q50)</span><span class="i18n-en">90% interval (q05–q95) / 50% interval (q25–q75) / median (q50)</span></span>
   </div>
   <div class="legend-item">
     <svg class="legend-swatch" width="48" height="16" viewBox="0 0 48 16" aria-hidden="true">
@@ -150,7 +180,7 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
       <rect x="24" y="1" width="24" height="14" style="fill: var(--color-series); fill-opacity: 0.176;"></rect>
       <line x1="24" y1="0" x2="24" y2="16" style="stroke: var(--color-axis-line); stroke-width: 1; stroke-dasharray: 3,3;"></line>
     </svg>
-    <span>検証済み予報(起点+6年、#0052/#0069) と 外挿領域(不確実性の広がり)の区別(不透明度・背景ウォッシュ・境界ラベルで表現)</span>
+    <span><span class="i18n-ja">検証済み予報(起点+6年、#0052/#0069) と 外挿領域(不確実性の広がり)の区別(不透明度・背景ウォッシュ・境界ラベルで表現)</span><span class="i18n-en">Distinction between verified forecast (origin + 6 years, #0052/#0069) and the extrapolated region (spread of uncertainty), expressed via opacity, background wash, and boundary label</span></span>
   </div>
 </footer>
 <main>
@@ -164,14 +194,14 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
   ></div>
 <div class="panel-grid">
   <section class="panel variable-panel" data-country="JPN" data-variable="P">
-    <h3>P — 総人口(persons)</h3>
-    <p class="panel-transform">変換: base_P * exp(xi_P)(1990年人口を基準とした対数正規変換の逆変換)</p>
+    <h3>P — <span class="i18n-ja">総人口</span><span class="i18n-en">Total population</span>(persons)</h3>
+    <p class="panel-transform"><span class="i18n-ja">変換</span><span class="i18n-en">Transform</span>: base_P * exp(xi_P)(1990年人口を基準とした対数正規変換の逆変換)</p>
     <div class="svg-container" data-role="chart" data-variable="P"></div>
         <details class="table-view">
-      <summary>表ビュー(P)</summary>
-      <p class="table-meta">単位: persons / 最終観測年: 2025</p>
+      <summary><span class="i18n-ja">表ビュー</span><span class="i18n-en">Table view</span>(P)</summary>
+      <p class="table-meta"><span class="i18n-ja">単位</span><span class="i18n-en">Unit</span>: persons / <span class="i18n-ja">最終観測年</span><span class="i18n-en">Last observation year</span>: 2025</p>
       <table>
-        <thead><tr><th>年</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
+        <thead><tr><th><span class="i18n-ja">年</span><span class="i18n-en">Year</span></th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
         <tbody>
         <tr><td>2025</td><td>1.20431e8</td><td>1.22398e8</td><td>1.23469e8</td><td>1.24406e8</td><td>1.26132e8</td></tr>
 <tr><td>2026</td><td>1.19859e8</td><td>1.22003e8</td><td>1.23122e8</td><td>1.24495e8</td><td>1.26446e8</td></tr>
@@ -211,14 +241,14 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
 
   </section>
   <section class="panel variable-panel" data-country="JPN" data-variable="w">
-    <h3>w — 生産年齢人口比率(15-64歳)(fraction (0-1))</h3>
-    <p class="panel-transform">変換: sigmoid(xi_w)(logit座標の逆変換)</p>
+    <h3>w — <span class="i18n-ja">生産年齢人口比率(15-64歳)</span><span class="i18n-en">Working-age population ratio (ages 15-64)</span>(fraction (0-1))</h3>
+    <p class="panel-transform"><span class="i18n-ja">変換</span><span class="i18n-en">Transform</span>: sigmoid(xi_w)(logit座標の逆変換)</p>
     <div class="svg-container" data-role="chart" data-variable="w"></div>
         <details class="table-view">
-      <summary>表ビュー(w)</summary>
-      <p class="table-meta">単位: fraction (0-1) / 最終観測年: 2025</p>
+      <summary><span class="i18n-ja">表ビュー</span><span class="i18n-en">Table view</span>(w)</summary>
+      <p class="table-meta"><span class="i18n-ja">単位</span><span class="i18n-en">Unit</span>: fraction (0-1) / <span class="i18n-ja">最終観測年</span><span class="i18n-en">Last observation year</span>: 2025</p>
       <table>
-        <thead><tr><th>年</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
+        <thead><tr><th><span class="i18n-ja">年</span><span class="i18n-en">Year</span></th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
         <tbody>
         <tr><td>2025</td><td>0.581175</td><td>0.584965</td><td>0.588455</td><td>0.591452</td><td>0.594996</td></tr>
 <tr><td>2026</td><td>0.583611</td><td>0.587237</td><td>0.591049</td><td>0.594279</td><td>0.597193</td></tr>
@@ -258,14 +288,14 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
 
   </section>
   <section class="panel variable-panel" data-country="JPN" data-variable="y">
-    <h3>y — 一人当たり産出(実質GDP/capita、合成観測)(USD (2015, per capita))</h3>
-    <p class="panel-transform">変換: base_y * exp(h_logy(xi))(合成観測 y の観測演算子 _h_logy の逆合成、SPEC §9.1)</p>
+    <h3>y — <span class="i18n-ja">一人当たり産出(実質GDP/capita、合成観測)</span><span class="i18n-en">Output per capita (real GDP per capita, composite observation)</span>(USD (2015, per capita))</h3>
+    <p class="panel-transform"><span class="i18n-ja">変換</span><span class="i18n-en">Transform</span>: base_y * exp(h_logy(xi))(合成観測 y の観測演算子 _h_logy の逆合成、SPEC §9.1)</p>
     <div class="svg-container" data-role="chart" data-variable="y"></div>
         <details class="table-view">
-      <summary>表ビュー(y)</summary>
-      <p class="table-meta">単位: USD (2015, per capita) / 最終観測年: 2025</p>
+      <summary><span class="i18n-ja">表ビュー</span><span class="i18n-en">Table view</span>(y)</summary>
+      <p class="table-meta"><span class="i18n-ja">単位</span><span class="i18n-en">Unit</span>: USD (2015, per capita) / <span class="i18n-ja">最終観測年</span><span class="i18n-en">Last observation year</span>: 2025</p>
       <table>
-        <thead><tr><th>年</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
+        <thead><tr><th><span class="i18n-ja">年</span><span class="i18n-en">Year</span></th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
         <tbody>
         <tr><td>2025</td><td>37792.7</td><td>38291.3</td><td>38744.3</td><td>39093.4</td><td>39903.9</td></tr>
 <tr><td>2026</td><td>38105.5</td><td>39019.2</td><td>39428.1</td><td>39896.6</td><td>40655.9</td></tr>
@@ -305,14 +335,14 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
 
   </section>
   <section class="panel variable-panel" data-country="JPN" data-variable="g_swiid">
-    <h3>g_swiid — 格差指標(可処分ジニ)(fraction (0-1))</h3>
-    <p class="panel-transform">変換: sigmoid(xi_g)(logit座標の逆変換)</p>
+    <h3>g_swiid — <span class="i18n-ja">格差指標(可処分ジニ)</span><span class="i18n-en">Inequality index (disposable-income Gini)</span>(fraction (0-1))</h3>
+    <p class="panel-transform"><span class="i18n-ja">変換</span><span class="i18n-en">Transform</span>: sigmoid(xi_g)(logit座標の逆変換)</p>
     <div class="svg-container" data-role="chart" data-variable="g_swiid"></div>
         <details class="table-view">
-      <summary>表ビュー(g_swiid)</summary>
-      <p class="table-meta">単位: fraction (0-1) / 最終観測年: 2021</p>
+      <summary><span class="i18n-ja">表ビュー</span><span class="i18n-en">Table view</span>(g_swiid)</summary>
+      <p class="table-meta"><span class="i18n-ja">単位</span><span class="i18n-en">Unit</span>: fraction (0-1) / <span class="i18n-ja">最終観測年</span><span class="i18n-en">Last observation year</span>: 2021</p>
       <table>
-        <thead><tr><th>年</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
+        <thead><tr><th><span class="i18n-ja">年</span><span class="i18n-en">Year</span></th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
         <tbody>
         <tr><td>2025</td><td>0.276911</td><td>0.283693</td><td>0.291625</td><td>0.299463</td><td>0.312932</td></tr>
 <tr><td>2026</td><td>0.273275</td><td>0.282141</td><td>0.291231</td><td>0.298801</td><td>0.313274</td></tr>
@@ -352,14 +382,14 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
 
   </section>
   <section class="panel variable-panel" data-country="JPN" data-variable="T_proxy">
-    <h3>T_proxy — 技術フロンティア(特許出願が観測代理)(patent applications (resident))</h3>
-    <p class="panel-transform">変換: base_T * exp(xi_T)(1990年値を基準とした対数正規変換の逆変換)</p>
+    <h3>T_proxy — <span class="i18n-ja">技術フロンティア(特許出願が観測代理)</span><span class="i18n-en">Technology frontier (patent applications as observation proxy)</span>(patent applications (resident))</h3>
+    <p class="panel-transform"><span class="i18n-ja">変換</span><span class="i18n-en">Transform</span>: base_T * exp(xi_T)(1990年値を基準とした対数正規変換の逆変換)</p>
     <div class="svg-container" data-role="chart" data-variable="T_proxy"></div>
         <details class="table-view">
-      <summary>表ビュー(T_proxy)</summary>
-      <p class="table-meta">単位: patent applications (resident) / 最終観測年: 2021</p>
+      <summary><span class="i18n-ja">表ビュー</span><span class="i18n-en">Table view</span>(T_proxy)</summary>
+      <p class="table-meta"><span class="i18n-ja">単位</span><span class="i18n-en">Unit</span>: patent applications (resident) / <span class="i18n-ja">最終観測年</span><span class="i18n-en">Last observation year</span>: 2021</p>
       <table>
-        <thead><tr><th>年</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
+        <thead><tr><th><span class="i18n-ja">年</span><span class="i18n-en">Year</span></th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
         <tbody>
         <tr><td>2025</td><td>294202.0</td><td>322471.0</td><td>337311.0</td><td>349036.0</td><td>363527.0</td></tr>
 <tr><td>2026</td><td>300826.0</td><td>329609.0</td><td>342754.0</td><td>355245.0</td><td>370673.0</td></tr>
@@ -399,14 +429,14 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
 
   </section>
   <section class="panel variable-panel" data-country="JPN" data-variable="phi">
-    <h3>phi — 技術普及率(ネット利用率が観測代理)(fraction (0-1))</h3>
-    <p class="panel-transform">変換: sigmoid(xi_phi)(logit座標の逆変換)</p>
+    <h3>phi — <span class="i18n-ja">技術普及率(ネット利用率が観測代理)</span><span class="i18n-en">Technology diffusion rate (internet usage as observation proxy)</span>(fraction (0-1))</h3>
+    <p class="panel-transform"><span class="i18n-ja">変換</span><span class="i18n-en">Transform</span>: sigmoid(xi_phi)(logit座標の逆変換)</p>
     <div class="svg-container" data-role="chart" data-variable="phi"></div>
         <details class="table-view">
-      <summary>表ビュー(phi)</summary>
-      <p class="table-meta">単位: fraction (0-1) / 最終観測年: 2024</p>
+      <summary><span class="i18n-ja">表ビュー</span><span class="i18n-en">Table view</span>(phi)</summary>
+      <p class="table-meta"><span class="i18n-ja">単位</span><span class="i18n-en">Unit</span>: fraction (0-1) / <span class="i18n-ja">最終観測年</span><span class="i18n-en">Last observation year</span>: 2024</p>
       <table>
-        <thead><tr><th>年</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
+        <thead><tr><th><span class="i18n-ja">年</span><span class="i18n-en">Year</span></th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
         <tbody>
         <tr><td>2025</td><td>0.844665</td><td>0.869293</td><td>0.879919</td><td>0.889144</td><td>0.909157</td></tr>
 <tr><td>2026</td><td>0.868099</td><td>0.887374</td><td>0.897789</td><td>0.907979</td><td>0.923664</td></tr>
@@ -446,14 +476,14 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
 
   </section>
   <section class="panel variable-panel" data-country="JPN" data-variable="v">
-    <h3>v — 情報伝播速度(モバイル契約が観測代理)(subscriptions per 100 people)</h3>
-    <p class="panel-transform">変換: base_v * exp(xi_v)(1990年値を基準とした対数正規変換の逆変換)</p>
+    <h3>v — <span class="i18n-ja">情報伝播速度(モバイル契約が観測代理)</span><span class="i18n-en">Information propagation speed (mobile subscriptions as observation proxy)</span>(subscriptions per 100 people)</h3>
+    <p class="panel-transform"><span class="i18n-ja">変換</span><span class="i18n-en">Transform</span>: base_v * exp(xi_v)(1990年値を基準とした対数正規変換の逆変換)</p>
     <div class="svg-container" data-role="chart" data-variable="v"></div>
         <details class="table-view">
-      <summary>表ビュー(v)</summary>
-      <p class="table-meta">単位: subscriptions per 100 people / 最終観測年: 2023</p>
+      <summary><span class="i18n-ja">表ビュー</span><span class="i18n-en">Table view</span>(v)</summary>
+      <p class="table-meta"><span class="i18n-ja">単位</span><span class="i18n-en">Unit</span>: subscriptions per 100 people / <span class="i18n-ja">最終観測年</span><span class="i18n-en">Last observation year</span>: 2023</p>
       <table>
-        <thead><tr><th>年</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
+        <thead><tr><th><span class="i18n-ja">年</span><span class="i18n-en">Year</span></th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
         <tbody>
         <tr><td>2025</td><td>154.407</td><td>174.648</td><td>186.309</td><td>202.307</td><td>231.57</td></tr>
 <tr><td>2026</td><td>150.203</td><td>176.343</td><td>192.555</td><td>217.056</td><td>253.217</td></tr>
@@ -493,14 +523,14 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
 
   </section>
   <section class="panel variable-panel" data-country="JPN" data-variable="tau">
-    <h3>tau — 制度信頼(WVS政府信頼)(fraction (0-1))</h3>
-    <p class="panel-transform">変換: sigmoid(xi_tau)(logit座標の逆変換)</p>
+    <h3>tau — <span class="i18n-ja">制度信頼(WVS政府信頼)</span><span class="i18n-en">Institutional trust (WVS government confidence)</span>(fraction (0-1))</h3>
+    <p class="panel-transform"><span class="i18n-ja">変換</span><span class="i18n-en">Transform</span>: sigmoid(xi_tau)(logit座標の逆変換)</p>
     <div class="svg-container" data-role="chart" data-variable="tau"></div>
         <details class="table-view">
-      <summary>表ビュー(tau)</summary>
-      <p class="table-meta">単位: fraction (0-1) / 最終観測年: 2019</p>
+      <summary><span class="i18n-ja">表ビュー</span><span class="i18n-en">Table view</span>(tau)</summary>
+      <p class="table-meta"><span class="i18n-ja">単位</span><span class="i18n-en">Unit</span>: fraction (0-1) / <span class="i18n-ja">最終観測年</span><span class="i18n-en">Last observation year</span>: 2019</p>
       <table>
-        <thead><tr><th>年</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
+        <thead><tr><th><span class="i18n-ja">年</span><span class="i18n-en">Year</span></th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
         <tbody>
         <tr><td>2025</td><td>0.261976</td><td>0.283158</td><td>0.296754</td><td>0.311792</td><td>0.335176</td></tr>
 <tr><td>2026</td><td>0.260193</td><td>0.284072</td><td>0.296944</td><td>0.311128</td><td>0.335881</td></tr>
@@ -540,14 +570,14 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
 
   </section>
   <section class="panel variable-panel" data-country="JPN" data-variable="p">
-    <h3>p — 政治的分極度(V-Dem v2cacamps、高いほど分裂)(fraction (0-1))</h3>
-    <p class="panel-transform">変換: sigmoid(xi_p)(logit座標の逆変換)</p>
+    <h3>p — <span class="i18n-ja">政治的分極度(V-Dem v2cacamps、高いほど分裂)</span><span class="i18n-en">Political polarization (V-Dem v2cacamps; higher = more polarized)</span>(fraction (0-1))</h3>
+    <p class="panel-transform"><span class="i18n-ja">変換</span><span class="i18n-en">Transform</span>: sigmoid(xi_p)(logit座標の逆変換)</p>
     <div class="svg-container" data-role="chart" data-variable="p"></div>
         <details class="table-view">
-      <summary>表ビュー(p)</summary>
-      <p class="table-meta">単位: fraction (0-1) / 最終観測年: 2025</p>
+      <summary><span class="i18n-ja">表ビュー</span><span class="i18n-en">Table view</span>(p)</summary>
+      <p class="table-meta"><span class="i18n-ja">単位</span><span class="i18n-en">Unit</span>: fraction (0-1) / <span class="i18n-ja">最終観測年</span><span class="i18n-en">Last observation year</span>: 2025</p>
       <table>
-        <thead><tr><th>年</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
+        <thead><tr><th><span class="i18n-ja">年</span><span class="i18n-en">Year</span></th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
         <tbody>
         <tr><td>2025</td><td>0.069025</td><td>0.125762</td><td>0.187762</td><td>0.347067</td><td>0.61358</td></tr>
 <tr><td>2026</td><td>0.061937</td><td>0.129843</td><td>0.218845</td><td>0.350741</td><td>0.624896</td></tr>
@@ -586,16 +616,16 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
     </details>
 
   </section>
-<p class="panel-footnote">y=0 は予報起点断面(予報積分前のアンサンブル事後分布)であり、y=1 以降が実際の予報値である。</p></div>
+<p class="panel-footnote"><span class="i18n-ja">y=0 は予報起点断面(予報積分前のアンサンブル事後分布)であり、y=1 以降が実際の予報値である。</span><span class="i18n-en">y=0 is the forecast-origin cross-section (the ensemble posterior before forecast integration); y=1 onward are the actual forecast values.</span></p></div>
   <section class="panel count-forecast-panel" data-country="JPN">
-    <h3>期待騒乱イベント数 / 年 </h3>
-    <p class="panel-note">単位: expected political disorder events per year, nu* × ∫intensity</p>
+    <h3><span class="i18n-ja">期待騒乱イベント数 / 年</span><span class="i18n-en">Expected unrest event count / year</span> </h3>
+    <p class="panel-note"><span class="i18n-ja">単位</span><span class="i18n-en">Unit</span>: expected political disorder events per year, nu* × ∫intensity</p>
     <p class="panel-footnote">nu_star = 4.33068 / r_hat = 9999.17</p>
     <div class="svg-container" data-role="chart" data-variable="count_forecast"></div>
     <details class="table-view">
-      <summary>表ビュー(count_forecast)</summary>
+      <summary><span class="i18n-ja">表ビュー</span><span class="i18n-en">Table view</span>(count_forecast)</summary>
       <table>
-        <thead><tr><th>年</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
+        <thead><tr><th><span class="i18n-ja">年</span><span class="i18n-en">Year</span></th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
         <tbody>
         <tr><td>2026</td><td>0.155959</td><td>0.241532</td><td>0.313735</td><td>0.436349</td><td>0.593769</td></tr>
 <tr><td>2027</td><td>0.123655</td><td>0.181411</td><td>0.232899</td><td>0.307618</td><td>0.470597</td></tr>
@@ -633,14 +663,14 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
     </details>
   </section>
   <section class="panel de-panel" data-country="JPN">
-    <h3>De — 体質診断(無次元)</h3>
-    <p class="panel-footnote">De=1: 安定/変動レジーム境界。外挿領域では個別値でなくレジーム傾向(De の帯が 1 を跨ぐか)を読む。</p>
+    <h3>De — <span class="i18n-ja">体質診断(無次元)</span><span class="i18n-en">Social Deborah number (dimensionless)</span></h3>
+    <p class="panel-footnote"><span class="i18n-ja">De=1: 安定/変動レジーム境界。外挿領域では個別値でなくレジーム傾向(De の帯が 1 を跨ぐか)を読む。</span><span class="i18n-en">De=1: boundary between stable and volatile regimes. In the extrapolated region, read the regime tendency (whether the De band crosses 1) rather than individual values.</span></p>
     <div class="svg-container" data-role="chart" data-variable="De"></div>
         <details class="table-view">
-      <summary>表ビュー(De)</summary>
-      <p class="table-meta">単位: dimensionless / 最終観測年: —(状態変数でない)</p>
+      <summary><span class="i18n-ja">表ビュー</span><span class="i18n-en">Table view</span>(De)</summary>
+      <p class="table-meta"><span class="i18n-ja">単位</span><span class="i18n-en">Unit</span>: dimensionless / <span class="i18n-ja">最終観測年</span><span class="i18n-en">Last observation year</span>: <span class="i18n-ja">—(状態変数でない)</span><span class="i18n-en">— (not a state variable)</span></p>
       <table>
-        <thead><tr><th>年</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
+        <thead><tr><th><span class="i18n-ja">年</span><span class="i18n-en">Year</span></th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
         <tbody>
         <tr><td>2025</td><td>0.087641</td><td>0.15968</td><td>0.238401</td><td>0.44067</td><td>0.779062</td></tr>
 <tr><td>2026</td><td>0.0786414</td><td>0.164862</td><td>0.277868</td><td>0.445336</td><td>0.793429</td></tr>
@@ -680,7 +710,7 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
 
   </section>
   <section class="panel provenance-panel" data-country="JPN">
-    <h3>来歴</h3>
+    <h3><span class="i18n-ja">来歴</span><span class="i18n-en">Provenance</span></h3>
     <dl class="provenance-list">
       <dt>commit</dt><dd title="d289ce716da59ccfed757441bd590198de50cd1b">d289ce71</dd>
       <dt>seed</dt><dd>20260711</dd>
@@ -710,14 +740,14 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
   ></div>
 <div class="panel-grid">
   <section class="panel variable-panel" data-country="THA" data-variable="P">
-    <h3>P — 総人口(persons)</h3>
-    <p class="panel-transform">変換: base_P * exp(xi_P)(1990年人口を基準とした対数正規変換の逆変換)</p>
+    <h3>P — <span class="i18n-ja">総人口</span><span class="i18n-en">Total population</span>(persons)</h3>
+    <p class="panel-transform"><span class="i18n-ja">変換</span><span class="i18n-en">Transform</span>: base_P * exp(xi_P)(1990年人口を基準とした対数正規変換の逆変換)</p>
     <div class="svg-container" data-role="chart" data-variable="P"></div>
         <details class="table-view">
-      <summary>表ビュー(P)</summary>
-      <p class="table-meta">単位: persons / 最終観測年: 2025</p>
+      <summary><span class="i18n-ja">表ビュー</span><span class="i18n-en">Table view</span>(P)</summary>
+      <p class="table-meta"><span class="i18n-ja">単位</span><span class="i18n-en">Unit</span>: persons / <span class="i18n-ja">最終観測年</span><span class="i18n-en">Last observation year</span>: 2025</p>
       <table>
-        <thead><tr><th>年</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
+        <thead><tr><th><span class="i18n-ja">年</span><span class="i18n-en">Year</span></th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
         <tbody>
         <tr><td>2025</td><td>7.10229e7</td><td>7.15844e7</td><td>7.17984e7</td><td>7.20505e7</td><td>7.24747e7</td></tr>
 <tr><td>2026</td><td>7.09853e7</td><td>7.14956e7</td><td>7.17816e7</td><td>7.21397e7</td><td>7.27419e7</td></tr>
@@ -757,14 +787,14 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
 
   </section>
   <section class="panel variable-panel" data-country="THA" data-variable="w">
-    <h3>w — 生産年齢人口比率(15-64歳)(fraction (0-1))</h3>
-    <p class="panel-transform">変換: sigmoid(xi_w)(logit座標の逆変換)</p>
+    <h3>w — <span class="i18n-ja">生産年齢人口比率(15-64歳)</span><span class="i18n-en">Working-age population ratio (ages 15-64)</span>(fraction (0-1))</h3>
+    <p class="panel-transform"><span class="i18n-ja">変換</span><span class="i18n-en">Transform</span>: sigmoid(xi_w)(logit座標の逆変換)</p>
     <div class="svg-container" data-role="chart" data-variable="w"></div>
         <details class="table-view">
-      <summary>表ビュー(w)</summary>
-      <p class="table-meta">単位: fraction (0-1) / 最終観測年: 2025</p>
+      <summary><span class="i18n-ja">表ビュー</span><span class="i18n-en">Table view</span>(w)</summary>
+      <p class="table-meta"><span class="i18n-ja">単位</span><span class="i18n-en">Unit</span>: fraction (0-1) / <span class="i18n-ja">最終観測年</span><span class="i18n-en">Last observation year</span>: 2025</p>
       <table>
-        <thead><tr><th>年</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
+        <thead><tr><th><span class="i18n-ja">年</span><span class="i18n-en">Year</span></th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
         <tbody>
         <tr><td>2025</td><td>0.690806</td><td>0.694298</td><td>0.697354</td><td>0.698943</td><td>0.70153</td></tr>
 <tr><td>2026</td><td>0.691281</td><td>0.695297</td><td>0.697732</td><td>0.699787</td><td>0.703148</td></tr>
@@ -804,14 +834,14 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
 
   </section>
   <section class="panel variable-panel" data-country="THA" data-variable="y">
-    <h3>y — 一人当たり産出(実質GDP/capita、合成観測)(USD (2015, per capita))</h3>
-    <p class="panel-transform">変換: base_y * exp(h_logy(xi))(合成観測 y の観測演算子 _h_logy の逆合成、SPEC §9.1)</p>
+    <h3>y — <span class="i18n-ja">一人当たり産出(実質GDP/capita、合成観測)</span><span class="i18n-en">Output per capita (real GDP per capita, composite observation)</span>(USD (2015, per capita))</h3>
+    <p class="panel-transform"><span class="i18n-ja">変換</span><span class="i18n-en">Transform</span>: base_y * exp(h_logy(xi))(合成観測 y の観測演算子 _h_logy の逆合成、SPEC §9.1)</p>
     <div class="svg-container" data-role="chart" data-variable="y"></div>
         <details class="table-view">
-      <summary>表ビュー(y)</summary>
-      <p class="table-meta">単位: USD (2015, per capita) / 最終観測年: 2025</p>
+      <summary><span class="i18n-ja">表ビュー</span><span class="i18n-en">Table view</span>(y)</summary>
+      <p class="table-meta"><span class="i18n-ja">単位</span><span class="i18n-en">Unit</span>: USD (2015, per capita) / <span class="i18n-ja">最終観測年</span><span class="i18n-en">Last observation year</span>: 2025</p>
       <table>
-        <thead><tr><th>年</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
+        <thead><tr><th><span class="i18n-ja">年</span><span class="i18n-en">Year</span></th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
         <tbody>
         <tr><td>2025</td><td>6607.06</td><td>6683.09</td><td>6776.51</td><td>6870.56</td><td>6925.53</td></tr>
 <tr><td>2026</td><td>6592.05</td><td>6833.67</td><td>6960.32</td><td>7052.11</td><td>7182.89</td></tr>
@@ -851,14 +881,14 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
 
   </section>
   <section class="panel variable-panel" data-country="THA" data-variable="g_swiid">
-    <h3>g_swiid — 格差指標(可処分ジニ)(fraction (0-1))</h3>
-    <p class="panel-transform">変換: sigmoid(xi_g)(logit座標の逆変換)</p>
+    <h3>g_swiid — <span class="i18n-ja">格差指標(可処分ジニ)</span><span class="i18n-en">Inequality index (disposable-income Gini)</span>(fraction (0-1))</h3>
+    <p class="panel-transform"><span class="i18n-ja">変換</span><span class="i18n-en">Transform</span>: sigmoid(xi_g)(logit座標の逆変換)</p>
     <div class="svg-container" data-role="chart" data-variable="g_swiid"></div>
         <details class="table-view">
-      <summary>表ビュー(g_swiid)</summary>
-      <p class="table-meta">単位: fraction (0-1) / 最終観測年: 2024</p>
+      <summary><span class="i18n-ja">表ビュー</span><span class="i18n-en">Table view</span>(g_swiid)</summary>
+      <p class="table-meta"><span class="i18n-ja">単位</span><span class="i18n-en">Unit</span>: fraction (0-1) / <span class="i18n-ja">最終観測年</span><span class="i18n-en">Last observation year</span>: 2024</p>
       <table>
-        <thead><tr><th>年</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
+        <thead><tr><th><span class="i18n-ja">年</span><span class="i18n-en">Year</span></th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
         <tbody>
         <tr><td>2025</td><td>0.360779</td><td>0.397039</td><td>0.420731</td><td>0.451024</td><td>0.485352</td></tr>
 <tr><td>2026</td><td>0.337324</td><td>0.412345</td><td>0.446824</td><td>0.476106</td><td>0.508352</td></tr>
@@ -898,14 +928,14 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
 
   </section>
   <section class="panel variable-panel" data-country="THA" data-variable="T_proxy">
-    <h3>T_proxy — 技術フロンティア(特許出願が観測代理)(patent applications (resident))</h3>
-    <p class="panel-transform">変換: base_T * exp(xi_T)(1990年値を基準とした対数正規変換の逆変換)</p>
+    <h3>T_proxy — <span class="i18n-ja">技術フロンティア(特許出願が観測代理)</span><span class="i18n-en">Technology frontier (patent applications as observation proxy)</span>(patent applications (resident))</h3>
+    <p class="panel-transform"><span class="i18n-ja">変換</span><span class="i18n-en">Transform</span>: base_T * exp(xi_T)(1990年値を基準とした対数正規変換の逆変換)</p>
     <div class="svg-container" data-role="chart" data-variable="T_proxy"></div>
         <details class="table-view">
-      <summary>表ビュー(T_proxy)</summary>
-      <p class="table-meta">単位: patent applications (resident) / 最終観測年: 2021</p>
+      <summary><span class="i18n-ja">表ビュー</span><span class="i18n-en">Table view</span>(T_proxy)</summary>
+      <p class="table-meta"><span class="i18n-ja">単位</span><span class="i18n-en">Unit</span>: patent applications (resident) / <span class="i18n-ja">最終観測年</span><span class="i18n-en">Last observation year</span>: 2021</p>
       <table>
-        <thead><tr><th>年</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
+        <thead><tr><th><span class="i18n-ja">年</span><span class="i18n-en">Year</span></th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
         <tbody>
         <tr><td>2025</td><td>995.382</td><td>1016.35</td><td>1030.6</td><td>1041.99</td><td>1064.1</td></tr>
 <tr><td>2026</td><td>1027.78</td><td>1052.42</td><td>1069.2</td><td>1084.12</td><td>1105.15</td></tr>
@@ -945,14 +975,14 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
 
   </section>
   <section class="panel variable-panel" data-country="THA" data-variable="phi">
-    <h3>phi — 技術普及率(ネット利用率が観測代理)(fraction (0-1))</h3>
-    <p class="panel-transform">変換: sigmoid(xi_phi)(logit座標の逆変換)</p>
+    <h3>phi — <span class="i18n-ja">技術普及率(ネット利用率が観測代理)</span><span class="i18n-en">Technology diffusion rate (internet usage as observation proxy)</span>(fraction (0-1))</h3>
+    <p class="panel-transform"><span class="i18n-ja">変換</span><span class="i18n-en">Transform</span>: sigmoid(xi_phi)(logit座標の逆変換)</p>
     <div class="svg-container" data-role="chart" data-variable="phi"></div>
         <details class="table-view">
-      <summary>表ビュー(phi)</summary>
-      <p class="table-meta">単位: fraction (0-1) / 最終観測年: 2024</p>
+      <summary><span class="i18n-ja">表ビュー</span><span class="i18n-en">Table view</span>(phi)</summary>
+      <p class="table-meta"><span class="i18n-ja">単位</span><span class="i18n-en">Unit</span>: fraction (0-1) / <span class="i18n-ja">最終観測年</span><span class="i18n-en">Last observation year</span>: 2024</p>
       <table>
-        <thead><tr><th>年</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
+        <thead><tr><th><span class="i18n-ja">年</span><span class="i18n-en">Year</span></th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
         <tbody>
         <tr><td>2025</td><td>0.903828</td><td>0.919445</td><td>0.925682</td><td>0.933712</td><td>0.9397</td></tr>
 <tr><td>2026</td><td>0.921873</td><td>0.934884</td><td>0.940091</td><td>0.946263</td><td>0.953082</td></tr>
@@ -992,14 +1022,14 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
 
   </section>
   <section class="panel variable-panel" data-country="THA" data-variable="v">
-    <h3>v — 情報伝播速度(モバイル契約が観測代理)(subscriptions per 100 people)</h3>
-    <p class="panel-transform">変換: base_v * exp(xi_v)(1990年値を基準とした対数正規変換の逆変換)</p>
+    <h3>v — <span class="i18n-ja">情報伝播速度(モバイル契約が観測代理)</span><span class="i18n-en">Information propagation speed (mobile subscriptions as observation proxy)</span>(subscriptions per 100 people)</h3>
+    <p class="panel-transform"><span class="i18n-ja">変換</span><span class="i18n-en">Transform</span>: base_v * exp(xi_v)(1990年値を基準とした対数正規変換の逆変換)</p>
     <div class="svg-container" data-role="chart" data-variable="v"></div>
         <details class="table-view">
-      <summary>表ビュー(v)</summary>
-      <p class="table-meta">単位: subscriptions per 100 people / 最終観測年: 2024</p>
+      <summary><span class="i18n-ja">表ビュー</span><span class="i18n-en">Table view</span>(v)</summary>
+      <p class="table-meta"><span class="i18n-ja">単位</span><span class="i18n-en">Unit</span>: subscriptions per 100 people / <span class="i18n-ja">最終観測年</span><span class="i18n-en">Last observation year</span>: 2024</p>
       <table>
-        <thead><tr><th>年</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
+        <thead><tr><th><span class="i18n-ja">年</span><span class="i18n-en">Year</span></th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
         <tbody>
         <tr><td>2025</td><td>144.019</td><td>152.491</td><td>160.003</td><td>169.446</td><td>181.716</td></tr>
 <tr><td>2026</td><td>139.735</td><td>153.628</td><td>164.643</td><td>172.688</td><td>185.104</td></tr>
@@ -1039,14 +1069,14 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
 
   </section>
   <section class="panel variable-panel" data-country="THA" data-variable="tau">
-    <h3>tau — 制度信頼(WVS政府信頼)(fraction (0-1))</h3>
-    <p class="panel-transform">変換: sigmoid(xi_tau)(logit座標の逆変換)</p>
+    <h3>tau — <span class="i18n-ja">制度信頼(WVS政府信頼)</span><span class="i18n-en">Institutional trust (WVS government confidence)</span>(fraction (0-1))</h3>
+    <p class="panel-transform"><span class="i18n-ja">変換</span><span class="i18n-en">Transform</span>: sigmoid(xi_tau)(logit座標の逆変換)</p>
     <div class="svg-container" data-role="chart" data-variable="tau"></div>
         <details class="table-view">
-      <summary>表ビュー(tau)</summary>
-      <p class="table-meta">単位: fraction (0-1) / 最終観測年: 2018</p>
+      <summary><span class="i18n-ja">表ビュー</span><span class="i18n-en">Table view</span>(tau)</summary>
+      <p class="table-meta"><span class="i18n-ja">単位</span><span class="i18n-en">Unit</span>: fraction (0-1) / <span class="i18n-ja">最終観測年</span><span class="i18n-en">Last observation year</span>: 2018</p>
       <table>
-        <thead><tr><th>年</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
+        <thead><tr><th><span class="i18n-ja">年</span><span class="i18n-en">Year</span></th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
         <tbody>
         <tr><td>2025</td><td>0.0562664</td><td>0.0687054</td><td>0.0831376</td><td>0.0929256</td><td>0.116971</td></tr>
 <tr><td>2026</td><td>0.0194031</td><td>0.0629167</td><td>0.0786349</td><td>0.089931</td><td>0.115455</td></tr>
@@ -1086,14 +1116,14 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
 
   </section>
   <section class="panel variable-panel" data-country="THA" data-variable="p">
-    <h3>p — 政治的分極度(V-Dem v2cacamps、高いほど分裂)(fraction (0-1))</h3>
-    <p class="panel-transform">変換: sigmoid(xi_p)(logit座標の逆変換)</p>
+    <h3>p — <span class="i18n-ja">政治的分極度(V-Dem v2cacamps、高いほど分裂)</span><span class="i18n-en">Political polarization (V-Dem v2cacamps; higher = more polarized)</span>(fraction (0-1))</h3>
+    <p class="panel-transform"><span class="i18n-ja">変換</span><span class="i18n-en">Transform</span>: sigmoid(xi_p)(logit座標の逆変換)</p>
     <div class="svg-container" data-role="chart" data-variable="p"></div>
         <details class="table-view">
-      <summary>表ビュー(p)</summary>
-      <p class="table-meta">単位: fraction (0-1) / 最終観測年: 2025</p>
+      <summary><span class="i18n-ja">表ビュー</span><span class="i18n-en">Table view</span>(p)</summary>
+      <p class="table-meta"><span class="i18n-ja">単位</span><span class="i18n-en">Unit</span>: fraction (0-1) / <span class="i18n-ja">最終観測年</span><span class="i18n-en">Last observation year</span>: 2025</p>
       <table>
-        <thead><tr><th>年</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
+        <thead><tr><th><span class="i18n-ja">年</span><span class="i18n-en">Year</span></th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
         <tbody>
         <tr><td>2025</td><td>0.207252</td><td>0.59004</td><td>0.830077</td><td>0.950111</td><td>0.992025</td></tr>
 <tr><td>2026</td><td>0.0737732</td><td>0.509368</td><td>0.765061</td><td>0.931531</td><td>0.984161</td></tr>
@@ -1132,16 +1162,16 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
     </details>
 
   </section>
-<p class="panel-footnote">y=0 は予報起点断面(予報積分前のアンサンブル事後分布)であり、y=1 以降が実際の予報値である。</p></div>
+<p class="panel-footnote"><span class="i18n-ja">y=0 は予報起点断面(予報積分前のアンサンブル事後分布)であり、y=1 以降が実際の予報値である。</span><span class="i18n-en">y=0 is the forecast-origin cross-section (the ensemble posterior before forecast integration); y=1 onward are the actual forecast values.</span></p></div>
   <section class="panel count-forecast-panel" data-country="THA">
-    <h3>期待騒乱イベント数 / 年 </h3>
-    <p class="panel-note">単位: expected political disorder events per year, nu* × ∫intensity</p>
+    <h3><span class="i18n-ja">期待騒乱イベント数 / 年</span><span class="i18n-en">Expected unrest event count / year</span> </h3>
+    <p class="panel-note"><span class="i18n-ja">単位</span><span class="i18n-en">Unit</span>: expected political disorder events per year, nu* × ∫intensity</p>
     <p class="panel-footnote">nu_star = 2.80295 / r_hat = 0.743423</p>
     <div class="svg-container" data-role="chart" data-variable="count_forecast"></div>
     <details class="table-view">
-      <summary>表ビュー(count_forecast)</summary>
+      <summary><span class="i18n-ja">表ビュー</span><span class="i18n-en">Table view</span>(count_forecast)</summary>
       <table>
-        <thead><tr><th>年</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
+        <thead><tr><th><span class="i18n-ja">年</span><span class="i18n-en">Year</span></th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
         <tbody>
         <tr><td>2026</td><td>1.9325</td><td>4.33627</td><td>12.4537</td><td>56.2172</td><td>140.147</td></tr>
 <tr><td>2027</td><td>1.62076</td><td>4.68086</td><td>13.074</td><td>49.1437</td><td>140.147</td></tr>
@@ -1179,14 +1209,14 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
     </details>
   </section>
   <section class="panel de-panel" data-country="THA">
-    <h3>De — 体質診断(無次元)</h3>
-    <p class="panel-footnote">De=1: 安定/変動レジーム境界。外挿領域では個別値でなくレジーム傾向(De の帯が 1 を跨ぐか)を読む。</p>
+    <h3>De — <span class="i18n-ja">体質診断(無次元)</span><span class="i18n-en">Social Deborah number (dimensionless)</span></h3>
+    <p class="panel-footnote"><span class="i18n-ja">De=1: 安定/変動レジーム境界。外挿領域では個別値でなくレジーム傾向(De の帯が 1 を跨ぐか)を読む。</span><span class="i18n-en">De=1: boundary between stable and volatile regimes. In the extrapolated region, read the regime tendency (whether the De band crosses 1) rather than individual values.</span></p>
     <div class="svg-container" data-role="chart" data-variable="De"></div>
         <details class="table-view">
-      <summary>表ビュー(De)</summary>
-      <p class="table-meta">単位: dimensionless / 最終観測年: —(状態変数でない)</p>
+      <summary><span class="i18n-ja">表ビュー</span><span class="i18n-en">Table view</span>(De)</summary>
+      <p class="table-meta"><span class="i18n-ja">単位</span><span class="i18n-en">Unit</span>: dimensionless / <span class="i18n-ja">最終観測年</span><span class="i18n-en">Last observation year</span>: <span class="i18n-ja">—(状態変数でない)</span><span class="i18n-en">— (not a state variable)</span></p>
       <table>
-        <thead><tr><th>年</th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
+        <thead><tr><th><span class="i18n-ja">年</span><span class="i18n-en">Year</span></th><th>q05</th><th>q25</th><th>q50</th><th>q75</th><th>q95</th></tr></thead>
         <tbody>
         <tr><td>2025</td><td>4.3248</td><td>9.69504</td><td>12.7571</td><td>14.5875</td><td>15.3539</td></tr>
 <tr><td>2026</td><td>2.42544</td><td>7.96811</td><td>12.0836</td><td>14.7343</td><td>15.7684</td></tr>
@@ -1226,7 +1256,7 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
 
   </section>
   <section class="panel provenance-panel" data-country="THA">
-    <h3>来歴</h3>
+    <h3><span class="i18n-ja">来歴</span><span class="i18n-en">Provenance</span></h3>
     <dl class="provenance-list">
       <dt>commit</dt><dd title="cdef3132d7a99836bae5e59ff898539fb90dd482">cdef3132</dd>
       <dt>seed</dt><dd>20260711</dd>
@@ -1247,21 +1277,30 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
 </div>
 
       <section class="panel disclaimer-panel">
-        <h3>免責注記</h3>
+        <h3><span class="i18n-ja">免責注記</span><span class="i18n-en">Disclaimer</span></h3>
         <p>
-          外挿領域(検証済みホライズンより先、y &gt; 6)の分位帯は、モデルの内生力学
-          (Hawkes 自己励起・OU 型緩和・L3 拡大パラメータの継続ランダムウォーク)のみに
-          基づく統計的投影であり、観測による制約を一切受けていない。
+          <span class="i18n-ja">外挿領域(検証済みホライズンより先、y &gt; 6)の分位帯は、モデルの内生力学
+(Hawkes 自己励起・OU 型緩和・L3 拡大パラメータの継続ランダムウォーク)のみに
+基づく統計的投影であり、観測による制約を一切受けていない。</span><span class="i18n-en">In the extrapolated region (beyond the verified horizon, y &gt; 6), the quantile
+bands are a purely statistical projection driven by the model's endogenous
+dynamics (Hawkes self-excitation, OU-type relaxation, ongoing random walk of
+the L3 expansion parameter), unconstrained by any observation.</span>
         </p>
         <p>
-          特に <code>p_ex_fallback: "no_count_data"</code> が発動している国・オリジンでは、
-          ジャンプ関連の力学(Γ 適用による急激な社会的応力上昇)が一切表現されないため、
-          <code>count_forecast</code> は「ジャンプが起きない前提」の過小評価である
-          可能性がある。
+          <span class="i18n-ja">特に <code>p_ex_fallback: "no_count_data"</code> が発動している国・オリジンでは、
+ジャンプ関連の力学(Γ 適用による急激な社会的応力上昇)が一切表現されないため、
+<code>count_forecast</code> は「ジャンプが起きない前提」の過小評価である
+可能性がある。</span><span class="i18n-en">In particular, for country/origin combinations where
+<code>p_ex_fallback: "no_count_data"</code> is triggered, jump-related dynamics
+(a sudden rise in social stress via Γ) are not represented at all, so
+<code>count_forecast</code> may be an underestimate that assumes "no jumps
+occur".</span>
         </p>
         <p>
-          検証の実証裏付けは M9/M10 の expanding-window walk-forward
-          (#0052 設計・#0069 合格判定)であり、検証済み範囲は起点+6年に限られる。
+          <span class="i18n-ja">検証の実証裏付けは M9/M10 の expanding-window walk-forward
+(#0052 設計・#0069 合格判定)であり、検証済み範囲は起点+6年に限られる。</span><span class="i18n-en">The empirical basis for verification is the M9/M10 expanding-window walk-forward
+(design #0052, pass verdict #0069), and the verified range is limited to
+origin + 6 years.</span>
         </p>
       </section>
 
@@ -1275,9 +1314,55 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
 
   var VARIABLE_ORDER = ["P", "w", "y", "g_swiid", "T_proxy", "phi", "v", "tau", "p", "De"];
 
-  var CHART_WIDTH = 640;
-  var CHART_HEIGHT = 260;
+  // #15(案 a): viewBox をコンテナ実幅から動的決定する。CHART_WIDTH_DEFAULT/
+  // CHART_HEIGHT_DEFAULT はコンテナ幅が測定不能な場合(レイアウト前・非表示)の
+  // フォールバックのみに使う。アスペクト比はこの既定値を保つ。
+  var CHART_WIDTH_DEFAULT = 640;
+  var CHART_HEIGHT_DEFAULT = 260;
+  var CHART_ASPECT = CHART_HEIGHT_DEFAULT / CHART_WIDTH_DEFAULT;
+  var MIN_CHART_WIDTH = 160;
+  var AXIS_FONT_SIZE = "11px";
   var MARGIN = { top: 20, right: 16, bottom: 32, left: 60 };
+
+  // #14: チャート JS が直接生成するテキスト(生成器がデータ駆動で埋め込めない
+  // ラベル)の対訳辞書。生成 HTML 自体はどちらの言語でも同一(決定性を維持)で、
+  // 表示切替はここから読むランタイム値のみに依存する。
+  var STRINGS = {
+    ja: {
+      ariaChart: "予報ファンチャート",
+      verified: "検証済み",
+      extrapolated: "外挿",
+      boundaryLabel: "検証済み | 外挿",
+      deThresholdLabel: "De=1: 安定/変動レジーム境界",
+      regimePrefix: "regime: ",
+      tooltipYear: function (year, status) { return String(year) + "年(" + status + ")"; },
+      summaryLine: function (year, horizon, n) {
+        return "予報起点 " + year + " / ホライズン " + horizon + " 年 / N=" + n;
+      }
+    },
+    en: {
+      ariaChart: "Forecast fan chart",
+      verified: "Verified",
+      extrapolated: "Extrapolated",
+      boundaryLabel: "Verified | Extrapolated",
+      deThresholdLabel: "De=1: stable/volatile regime boundary",
+      regimePrefix: "regime: ",
+      tooltipYear: function (year, status) { return String(year) + " (" + status + ")"; },
+      summaryLine: function (year, horizon, n) {
+        return "Forecast start " + year + " / Horizon " + horizon + " years / N=" + n;
+      }
+    }
+  };
+  var LANG_STORAGE_KEY = "mirai-yohou-dashboard-lang";
+
+  function currentLang() {
+    var l = document.documentElement.getAttribute("data-lang");
+    return l === "en" ? "en" : "ja";
+  }
+
+  function t() {
+    return STRINGS[currentLang()];
+  }
 
   var renderedCountries = {};
 
@@ -1351,21 +1436,50 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
     return [min - pad, max + pad];
   }
 
-  function makeScaleX(years) {
+  function makeScaleX(years, width) {
     var y0 = years[0], y1 = years[years.length - 1];
-    var x0 = MARGIN.left, x1 = CHART_WIDTH - MARGIN.right;
+    var x0 = MARGIN.left, x1 = width - MARGIN.right;
     var span = (y1 - y0) || 1;
     return function (year) {
       return x0 + ((year - y0) / span) * (x1 - x0);
     };
   }
 
-  function makeScaleY(domain) {
-    var y0 = MARGIN.top, y1 = CHART_HEIGHT - MARGIN.bottom;
+  function makeScaleY(domain, height) {
+    var y0 = MARGIN.top, y1 = height - MARGIN.bottom;
     var span = (domain[1] - domain[0]) || 1;
     return function (v) {
       return y1 - ((v - domain[0]) / span) * (y1 - y0);
     };
+  }
+
+  function measureContainerWidth(container) {
+    var w = container.getBoundingClientRect().width;
+    if (!w || w <= 0) return CHART_WIDTH_DEFAULT;
+    return Math.max(MIN_CHART_WIDTH, Math.round(w));
+  }
+
+  // #15(案 a): ResizeObserver でコンテナ幅の変化を検知し、しきい値(2px)を
+  // 超えたときのみ再描画する(サブピクセルの発火・再描画ループを避ける)。
+  function attachResponsiveRedraw(container, redraw) {
+    if (container._responsiveAttached) return;
+    container._responsiveAttached = true;
+    if (typeof ResizeObserver === "undefined") return;
+    var lastWidth = null;
+    var pending = false;
+    var ro = new ResizeObserver(function () {
+      if (pending) return;
+      pending = true;
+      window.requestAnimationFrame(function () {
+        pending = false;
+        var w = container.getBoundingClientRect().width;
+        if (w > 0 && (lastWidth === null || Math.abs(w - lastWidth) > 2)) {
+          lastWidth = w;
+          redraw();
+        }
+      });
+    });
+    ro.observe(container);
   }
 
   function buildPolygonPoints(years, upper, lower, scaleX, scaleY) {
@@ -1409,23 +1523,29 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
     var untilYear = opts.untilYear;
     var threshold = opts.threshold;
 
+    // #15(案 a): viewBox をコンテナの実測幅から都度決定する。1 viewBox 単位が
+    // 実際の 1px に一致するため、font-size を実 px として指定でき、320px 幅の
+    // グリッド縮小パネルでも軸文字が AXIS_FONT_SIZE のまま読める。
+    var width = measureContainerWidth(container);
+    var height = Math.round(width * CHART_ASPECT);
+
     var extraForDomain = threshold ? [threshold.value] : [];
     var domain = computeYDomain(quantiles, extraForDomain);
-    var scaleX = makeScaleX(years);
-    var scaleY = makeScaleY(domain);
+    var scaleX = makeScaleX(years, width);
+    var scaleY = makeScaleY(domain, height);
 
     var svg = svgEl("svg", {
-      viewBox: "0 0 " + CHART_WIDTH + " " + CHART_HEIGHT,
+      viewBox: "0 0 " + width + " " + height,
       width: "100%",
       height: "auto",
       preserveAspectRatio: "xMidYMid meet",
       role: "img",
-      "aria-label": "予報ファンチャート",
+      "aria-label": t().ariaChart,
       "class": "chart-svg"
     });
 
-    var plotX0 = MARGIN.left, plotX1 = CHART_WIDTH - MARGIN.right;
-    var plotY0 = MARGIN.top, plotY1 = CHART_HEIGHT - MARGIN.bottom;
+    var plotX0 = MARGIN.left, plotX1 = width - MARGIN.right;
+    var plotY0 = MARGIN.top, plotY1 = height - MARGIN.bottom;
 
     var hasSplit = untilYear !== null && untilYear !== undefined &&
       untilYear > years[0] && untilYear < years[years.length - 1];
@@ -1440,6 +1560,17 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
       svg.appendChild(wash);
     }
 
+    // しきい値線(De=1 等)のピクセル位置・ラベル位置を先に求めておく。近接する
+    // 通常の目盛はラベルを間引いて重なりを避ける(線自体が既にその値を示すため
+    // 目盛ラベルは冗長。ラベルは上端(境界ラベルの行)に来る場合だけ線の下に
+    // 逃がす — #15: 実 px フォント化で文字が大きくなった分、重なりが顕在化
+    // しやすいため)。
+    var thresholdY = threshold ? scaleY(threshold.value) : null;
+    var thresholdLabelY = threshold
+      ? ((thresholdY < (plotY0 + 16)) ? (thresholdY + 14) : (thresholdY - 4))
+      : null;
+    var tickRowHeight = (plotY1 - plotY0) / 4;
+
     var yTickValues = linspace(domain[0], domain[1], 5);
     yTickValues.forEach(function (v) {
       var yPix = scaleY(v);
@@ -1449,9 +1580,16 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
         "class": "chart-gridline"
       });
       svg.appendChild(line);
+      var collidesThreshold = thresholdY !== null && (
+        Math.abs(yPix - thresholdY) < tickRowHeight * 0.6 ||
+        Math.abs(yPix - thresholdLabelY) < tickRowHeight * 0.6
+      );
+      if (collidesThreshold) {
+        return;
+      }
       var label = svgEl("text", {
         x: plotX0 - 6, y: yPix, "text-anchor": "end", "dominant-baseline": "middle",
-        style: "fill: var(--color-axis-label); font-size: 9px;",
+        style: "fill: var(--color-axis-label); font-size: " + AXIS_FONT_SIZE + ";",
         "class": "chart-axis-label"
       });
       label.textContent = formatAxisValue(v, unit);
@@ -1468,7 +1606,7 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
       svg.appendChild(tick);
       var label = svgEl("text", {
         x: xPix, y: (plotY1 + 14), "text-anchor": "middle",
-        style: "fill: var(--color-axis-label); font-size: 9px;",
+        style: "fill: var(--color-axis-label); font-size: " + AXIS_FONT_SIZE + ";",
         "class": "chart-axis-label"
       });
       label.textContent = String(yr);
@@ -1523,19 +1661,21 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
     }
 
     if (threshold) {
-      var ty = scaleY(threshold.value);
       var tline = svgEl("line", {
-        x1: plotX0, x2: plotX1, y1: ty, y2: ty,
+        x1: plotX0, x2: plotX1, y1: thresholdY, y2: thresholdY,
         style: "stroke: var(--color-axis-line); stroke-width: 1.5; stroke-dasharray: 5,4;",
         "class": "threshold-line"
       });
       svg.appendChild(tline);
       var tlabel = svgEl("text", {
-        x: plotX1, y: (ty - 4), "text-anchor": "end",
-        style: "fill: var(--color-text-secondary); font-size: 9px;",
+        x: plotX1, y: thresholdLabelY, "text-anchor": "end",
+        style: "fill: var(--color-text-secondary); font-size: " + AXIS_FONT_SIZE + ";",
         "class": "threshold-label"
       });
-      tlabel.textContent = threshold.label;
+      // 言語は opts に焼き込まず毎回 t() で読む(ResizeObserver の古いクロージャ経由の
+      // 再描画でも現在の言語設定を反映するため — opts.threshold.label に固定文字列を
+      // 持たせると、リサイズ再描画時に初回描画時点の言語のまま固まってしまう)。
+      tlabel.textContent = t().deThresholdLabel;
       svg.appendChild(tlabel);
     }
 
@@ -1548,10 +1688,10 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
       svg.appendChild(boundaryLine);
       var boundaryLabel = svgEl("text", {
         x: boundaryX, y: (plotY0 - 6), "text-anchor": "middle",
-        style: "fill: var(--color-text-secondary); font-size: 9px;",
+        style: "fill: var(--color-text-secondary); font-size: " + AXIS_FONT_SIZE + ";",
         "class": "verified-boundary-label"
       });
-      boundaryLabel.textContent = "検証済み | 外挿";
+      boundaryLabel.textContent = t().boundaryLabel;
       svg.appendChild(boundaryLabel);
     }
 
@@ -1593,7 +1733,7 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
     function handleMove(clientX, clientY) {
       var rect = svg.getBoundingClientRect();
       if (rect.width === 0) return;
-      var scale = CHART_WIDTH / rect.width;
+      var scale = width / rect.width;
       var px = (clientX - rect.left) * scale;
       var year = years[0] + ((px - plotX0) / (plotX1 - plotX0)) * (years[years.length - 1] - years[0]);
       var idx = nearestIndex(year);
@@ -1608,18 +1748,18 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
       crosshairH.setAttribute("visibility", "visible");
 
       var status = (untilYear !== null && untilYear !== undefined && years[idx] <= untilYear)
-        ? "検証済み" : "外挿";
+        ? t().verified : t().extrapolated;
 
       var lines = [
-        (String(years[idx]) + "年(" + status + ")"),
+        t().tooltipYear(years[idx], status),
         ("q05: " + formatTooltipValue(quantiles.q05[idx], unit)),
         ("q25: " + formatTooltipValue(quantiles.q25[idx], unit)),
         ("q50: " + formatTooltipValue(quantiles.q50[idx], unit)),
         ("q75: " + formatTooltipValue(quantiles.q75[idx], unit)),
         ("q95: " + formatTooltipValue(quantiles.q95[idx], unit))
       ];
-      tooltip.innerHTML = lines.map(function (t) {
-        return ("<div>" + t.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</div>");
+      tooltip.innerHTML = lines.map(function (line) {
+        return ("<div>" + line.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</div>");
       }).join("");
       tooltip.style.display = "block";
 
@@ -1657,6 +1797,10 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
       ev.preventDefault();
     }, { passive: false });
     overlay.addEventListener("touchend", handleLeave);
+
+    attachResponsiveRedraw(container, function () {
+      renderFanChart(container, opts);
+    });
   }
 
   function renderCountryCharts(country, data) {
@@ -1677,7 +1821,7 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
         untilYear: untilYear
       };
       if (name === "De") {
-        opts.threshold = { value: 1, label: "De=1: 安定/変動レジーム境界" };
+        opts.threshold = { value: 1 };
       }
       renderFanChart(container, opts);
     });
@@ -1695,28 +1839,33 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
     }
   }
 
-  function selectCountry(country) {
-    var panels = document.querySelectorAll(".country-panel");
-    panels.forEach(function (p) {
-      p.hidden = p.getAttribute("data-country") !== country;
-    });
-    var tabs = document.querySelectorAll(".country-tab");
-    tabs.forEach(function (t) {
-      var isSel = t.getAttribute("data-country") === country;
-      t.setAttribute("aria-selected", isSel ? "true" : "false");
-    });
+  function updateSummaryLine(country) {
     var meta = document.querySelector(
       '.country-meta[data-country="' + country + '"]'
     );
     var badge = document.getElementById("regime-badge");
     var summary = document.getElementById("forecast-summary");
     if (meta && badge && summary) {
-      badge.textContent = "regime: " + meta.getAttribute("data-regime");
-      summary.textContent =
-        "予報起点 " + meta.getAttribute("data-forecast-start-year") +
-        " / ホライズン " + meta.getAttribute("data-horizon-years") + " 年" +
-        " / N=" + meta.getAttribute("data-n");
+      badge.textContent = t().regimePrefix + meta.getAttribute("data-regime");
+      summary.textContent = t().summaryLine(
+        meta.getAttribute("data-forecast-start-year"),
+        meta.getAttribute("data-horizon-years"),
+        meta.getAttribute("data-n")
+      );
     }
+  }
+
+  function selectCountry(country) {
+    var panels = document.querySelectorAll(".country-panel");
+    panels.forEach(function (p) {
+      p.hidden = p.getAttribute("data-country") !== country;
+    });
+    var tabs = document.querySelectorAll(".country-tab");
+    tabs.forEach(function (tabEl) {
+      var isSel = tabEl.getAttribute("data-country") === country;
+      tabEl.setAttribute("aria-selected", isSel ? "true" : "false");
+    });
+    updateSummaryLine(country);
     if (window.location.hash !== "#" + country) {
       window.location.hash = country;
     }
@@ -1727,6 +1876,52 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
         renderedCountries[country] = true;
       }
     }
+  }
+
+  // #14: JA/EN トグル。html[data-lang] 属性の付替えは CSS(.i18n-ja/.i18n-en)が
+  // 表示切替を担う。チャート SVG・サマリ行はテキストを直接生成するため、ここで
+  // 現在表示中の国のみ再描画してテキストを追従させる。
+  function applyLang(lang) {
+    document.documentElement.setAttribute("data-lang", lang);
+    document.documentElement.lang = lang;
+
+    document.querySelectorAll(".lang-btn").forEach(function (btn) {
+      var isSel = btn.getAttribute("data-lang-option") === lang;
+      btn.setAttribute("aria-pressed", isSel ? "true" : "false");
+    });
+
+    document.querySelectorAll("[data-aria-ja][data-aria-en]").forEach(function (el) {
+      el.setAttribute("aria-label", lang === "en" ? el.getAttribute("data-aria-en") : el.getAttribute("data-aria-ja"));
+    });
+
+    try {
+      window.localStorage.setItem(LANG_STORAGE_KEY, lang);
+    } catch (e) { /* localStorage 不可(private mode 等)— 保存は諦めて継続 */ }
+
+    // 描画キャッシュを破棄する: 非表示国のチャートは旧言語の SVG ラベル
+    // (境界・しきい値)を焼き込んだままなので、次に国切替されたとき
+    // selectCountry の遅延描画パスで現在の言語で再描画させる。表示中の国だけ
+    // ここで即時再描画する(ResizeObserver は幅不変だと再発火しないため、
+    // キャッシュ破棄なしでは切替後も旧言語が残る)。
+    renderedCountries = {};
+    var activePanel = document.querySelector(".country-panel:not([hidden])");
+    if (activePanel) {
+      var country = activePanel.getAttribute("data-country");
+      updateSummaryLine(country);
+      var data = readCountryData(country);
+      if (data) {
+        renderCountryCharts(country, data);
+        renderedCountries[country] = true;
+      }
+    }
+  }
+
+  function readStoredLang() {
+    try {
+      var stored = window.localStorage.getItem(LANG_STORAGE_KEY);
+      if (stored === "ja" || stored === "en") return stored;
+    } catch (e) { /* localStorage 不可 — 既定の ja にフォールバック */ }
+    return "ja";
   }
 
   function init() {
@@ -1741,11 +1936,19 @@ footer.legend-bar { padding: 0.5rem 1.25rem; color: var(--color-text-secondary);
       });
     });
 
+    document.querySelectorAll(".lang-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        applyLang(btn.getAttribute("data-lang-option"));
+      });
+    });
+
     var initial = window.location.hash
       ? window.location.hash.replace("#", "")
       : countries[0];
     if (countries.indexOf(initial) === -1) initial = countries[0];
     selectCountry(initial);
+
+    applyLang(readStoredLang());
   }
 
   if (document.readyState === "loading") {

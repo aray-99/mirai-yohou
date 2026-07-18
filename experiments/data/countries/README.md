@@ -5,7 +5,9 @@
 `build_observations.jl`)の対象国に追加される(引数省略時は本ディレクトリの
 全 ISO3 が対象)。
 
-- `name_en`: ACLED / SWIID 検索用の英語国名。
+- `name_en`: ACLED / World Bank 検索用の英語国名。
+- `swiid_name_en`(省略可): SWIID の国名表記が `name_en` と異なる場合の上書き
+  (例: KOR は ACLED/WB が "South Korea"、SWIID が "Korea"。#0077)。
 - `regime`: `build_params` に渡すレジーム(`:stable` / `:volatile` 等)。
 - `[acled] year_from`: ACLED 取得開始年。
 - `[acled] exclude_admin1`: 国政レベル分析で除外する admin1 のリスト

@@ -49,7 +49,9 @@ function main()
     src = swiid_summary_path()
     mkpath(RAW_DIR)
     for iso in countries
-        cname = load_country_config(iso)["name_en"]
+        cfg = load_country_config(iso)
+        # SWIID の国名表記が ACLED/WB と異なる場合の上書き(例: KOR は SWIID 側 "Korea"。#0077)
+        cname = get(cfg, "swiid_name_en", cfg["name_en"])
         rows = Tuple{Int, Float64, Float64}[]   # (year, gini_disp, se)
         for (i, line) in enumerate(eachline(src))
             i == 1 && continue

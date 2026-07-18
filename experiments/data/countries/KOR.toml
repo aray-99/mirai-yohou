@@ -1,0 +1,10 @@
+# 国別データ設定(Issue #3、M13 #0077)。書式は countries/README.md 参照。
+name_en = "South Korea"    # ACLED / WB の英語国名
+swiid_name_en = "Korea"    # SWIID の国名表記が異なるための上書き(#0077)
+regime = "stable"          # 確定(#0078: 全期間死者 0、抗議中心の低烈度民主制)
+
+[acled]
+year_from = 2018           # fetch_acled の取得開始年(公式カバレッジ表、#0077)
+exclude_admin1 = []        # 確定(#0078: 死者 0・慢性地域紛争なしで除外対象なし)
+calib_from = 2018-01-01    # 確定(#0078。制約要因 = ACLED 開始年)
+calib_to = 2021-12-31      # 確定(#0078。制約要因 = WB Gini/特許出願の終了年 2021)

@@ -28,13 +28,40 @@ include(joinpath(@__DIR__, "data", "prepare_events.jl"))
 const T_EPOCH = Date(1990, 1, 1)
 date_to_t(d::Date) = Dates.value(d - T_EPOCH) / 365.25
 
-"国別設定(#0030-3/-4)。時刻は 1990 年起点の年"
-const COUNTRY_CFG = Dict(
-    "JPN" => (regime = :stable, calib = (5.0, 26.0), verif = (26.0, 35.0),
-              exclude_admin1 = String[], acled_from = date_to_t(Date(2018, 1, 1))),
-    "THA" => (regime = :volatile, calib = (20.0, 28.0), verif = (28.0, 35.0),
-              exclude_admin1 = DEEP_SOUTH_THA, acled_from = date_to_t(Date(2010, 1, 1))),
-)
+"""
+国別設定(#0030-3/-4)を TOML(`experiments/data/countries/<ISO3>.toml`)から
+構築する(#0077, Issue #22)。`[hindcast]` セクション(calib_t/verif_t、1990年
+起点の年)が無い国は較正/検証ウィンドウが未確定(科学的判断でオーナーが
+Issue #20 で確定するまで対象外)なので、ロード時に明確なエラーで停止する。
+"""
+function build_country_cfg(iso3::AbstractString, cfg::AbstractDict)
+    haskey(cfg, "hindcast") || error(
+        "$iso3: [hindcast] セクションがありません。calib_t/verif_t のウィンドウ確定は" *
+        "科学的判断(オーナーが Issue #20 で確定)が必要なため、現時点では M8" *
+        "ヒンドキャストの対象外です。countries/$(iso3).toml に [hindcast] を" *
+        "追記してください。")
+    hc = cfg["hindcast"]
+    acled = cfg["acled"]
+    return (
+        regime = Symbol(cfg["regime"]),
+        calib = Tuple(Float64.(hc["calib_t"])),
+        verif = Tuple(Float64.(hc["verif_t"])),
+        exclude_admin1 = Vector{String}(acled["exclude_admin1"]),
+        acled_from = date_to_t(acled["acled_from"]),
+    )
+end
+
+"国別設定(#0030-3/-4)。時刻は 1990 年起点の年。TOML の [hindcast] 駆動(#0077)。
+[hindcast] 未確定の国(KOR/TUR は Issue #20 でオーナーが確定するまで)は含めない —
+eager 全国構築にすると未確定国の TOML が存在するだけで include が失敗するため。"
+const COUNTRY_CFG = Dict(c => build_country_cfg(c, cfg)
+    for (c, cfg) in ((c, load_country_config(c)) for c in list_countries())
+    if haskey(cfg, "hindcast"))
+
+"COUNTRY_CFG の参照(未確定国は明確なエラー。KeyError にしない)"
+country_cfg(country::AbstractString) = get(COUNTRY_CFG, country) do
+    build_country_cfg(country, load_country_config(country))   # [hindcast] 欠落の明確なエラーを再利用
+end
 
 const T1 = 35.0                      # 2024 年末まで(ACLED エンバーゴ内)
 
@@ -126,7 +153,7 @@ end
 
 "窓別観測カウント列(#0031)。負値 = ACLED カバレッジ外"
 function build_obs_counts(country, cfg::AssimConfig)
-    ccfg = COUNTRY_CFG[country]
+    ccfg = country_cfg(country)
     nwin = floor(Int, round((cfg.t1 - cfg.t0) / cfg.dt) /
                       max(1, round(Int, cfg.event_window / cfg.dt)))
     counts = fill(-1, nwin)
@@ -149,8 +176,8 @@ window では、しきい値を「窓開始〜オリジン t_k」のデータの
 ために明示的に渡す(呼び出し側で `t < cfg.t1` に事後フィルタするので、
 しきい値算出さえ未来データに触れなければ検証区間への漏洩はない)。
 """
-function build_forced_jumps(country; calib_window = COUNTRY_CFG[country].calib)
-    ccfg = COUNTRY_CFG[country]
+function build_forced_jumps(country; calib_window = country_cfg(country).calib)
+    ccfg = country_cfg(country)
     ev = political_events(load_events(country); exclude_admin1 = ccfg.exclude_admin1)
     isempty(ev) && return Float64[]
     ws, c, f = weekly_counts(ev)
@@ -396,7 +423,7 @@ end
 function run_country(country::String; N::Int = 100, seed::Integer = 20260708,
                      smoke::Bool = false, calibrated::Bool = false,
                      rejuvenation_a::Float64 = 1.0)
-    ccfg = COUNTRY_CFG[country]
+    ccfg = country_cfg(country)
     params0 = build_params(ccfg.regime)
     println("== $country ($(ccfg.regime)) ==")
     recs = build_observations(country, params0; t1 = T1)

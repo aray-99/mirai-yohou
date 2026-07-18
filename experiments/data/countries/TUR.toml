@@ -1,0 +1,15 @@
+# 国別データ設定(Issue #3、M13 #0077)。書式は countries/README.md 参照。
+name_en = "Turkey"    # ACLED / WB / SWIID の英語国名
+regime = "volatile"   # 確定(#0078: 較正窓内死者 9,271、内生ジャンプあり)
+
+[acled]
+year_from = 2016      # fetch_acled の取得開始年(公式カバレッジ表、#0077)
+# 南東部・東部のクルド紛争(PKK)12県(#0078)。全期間死者の 85.7% をイベントシェア
+# 31.1% で占める慢性地域紛争 — THA 深南部 4 県(85%、#0026/#0030)と同型の除外。
+# 表記は ACLED admin1 の ASCII 形に一致させること。
+exclude_admin1 = [
+    "Sirnak", "Hakkari", "Diyarbakir", "Mardin", "Tunceli", "Van",
+    "Siirt", "Bitlis", "Bingol", "Agri", "Batman", "Mus",
+]
+calib_from = 2016-01-01   # 確定(#0078。制約要因 = ACLED 開始年)
+calib_to = 2021-12-31     # 確定(#0078。制約要因 = WB 特許出願の終了年 2021)

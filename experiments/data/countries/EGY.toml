@@ -1,0 +1,12 @@
+# 国別データ設定(Issue #33、DECISIONS #0086)。書式は countries/README.md 参照。
+name_en = "Egypt"    # ACLED / WB / SWIID の英語国名
+regime = "volatile"  # 確定(#0087: 除外後系列にも 2011 革命/2013 政変の内生ジャンプ)
+
+[acled]
+year_from = 1997                  # fetch_acled の取得開始年(アフリカ収録 1997〜、実データ確認済み)
+# シナイ反乱(2013〜、ISIS 系)の北シナイ県(#0087)。2014-2021 死者の 84.5% を
+# 単一県で占める慢性地域紛争 — THA 深南部(#0026/#0030)・TUR 南東部(#0078)と同型。
+exclude_admin1 = ["North Sinai"]
+acled_from = 1997-01-01           # 実カバレッジ開始日(EGY_events.csv date_range 1997-01-03–)
+calib_from = 2011-01-01           # 確定(#0087。2011 革命を断点とする 11 年窓)
+calib_to = 2021-12-31             # 確定(#0087。制約要因 = WB 系列終端 2021、KOR/TUR と同一)

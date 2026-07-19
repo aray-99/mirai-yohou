@@ -39,6 +39,7 @@ const M9_ORIGINS = Dict(
     "THA" => collect(28:33),
     "KOR" => collect(26:33),
     "TUR" => collect(30:33),
+    "EGY" => collect(29:33),
 )
 
 const M9_HORIZON = 1.0    # 1年先予報(#0052)

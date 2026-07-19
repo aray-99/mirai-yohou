@@ -33,7 +33,7 @@ include(joinpath(@__DIR__, "M8_hindcast.jl"))
         @test tha.exclude_admin1 == DEEP_SOUTH_THA
         @test tha.acled_from == date_to_t(Date(2010, 1, 1))
 
-        @test Set(keys(COUNTRY_CFG)) == Set(["JPN", "THA", "KOR", "TUR"])
+        @test Set(keys(COUNTRY_CFG)) == Set(["JPN", "THA", "KOR", "TUR", "EGY"])
     end
 
     @testset "KOR/TUR が #0079 凍結値と一致" begin
@@ -51,6 +51,15 @@ include(joinpath(@__DIR__, "M8_hindcast.jl"))
         @test length(tur.exclude_admin1) == 12   # クルド12県(#0078)
         @test "Sirnak" in tur.exclude_admin1
         @test tur.acled_from == date_to_t(Date(2016, 1, 1))
+    end
+
+    @testset "EGY が #0088 凍結値と一致" begin
+        egy = COUNTRY_CFG["EGY"]
+        @test egy.regime == :volatile
+        @test egy.calib == (21.0, 29.0)          # THA 型・ACLED 整合(#0088)
+        @test egy.verif == (29.0, 35.0)
+        @test egy.exclude_admin1 == ["North Sinai"]
+        @test egy.acled_from == date_to_t(Date(1997, 1, 1))
     end
 
     @testset "[hindcast] 欠落国は明確なエラー(Issue #20 参照)" begin

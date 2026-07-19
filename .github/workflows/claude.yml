@@ -46,3 +46,15 @@ jobs:
           # 開発フローは feature → develop(main はマイルストーン時のみ)。
           # 既定はデフォルトブランチ(main)起点のため明示する(PR #23 で顕在化)
           base_branch: develop
+          # 常時遵守事項の明示注入(CLAUDE.md 記載だけでは PR #25 で件名規約が
+          # 破られたため。DECISIONS 参照の書式・凍結ファイル・公開 HTML 不可侵)
+          prompt: |
+            以下は本リポジトリの常時遵守事項です(Issue 本文より優先):
+            - コミット件名は英語 Conventional Commits。件名に (#XXXX) 形式の
+              DECISIONS 参照を入れない(GitHub の issue/PR 参照と誤読される)。
+              参照は本文末尾の `Refs: docs/DECISIONS.md#XXXX` 行に書く。
+            - docs/dashboard/index.html は再生成・編集しない(オーナー実施)。
+            - 凍結ファイル(M8_frozen_config.toml、experiments/data/raw/ 配下)に
+              触れない。触れる必要が生じたら作業を止めて報告する。
+            - Julia はこの環境で実行不可。テストはオーナーがレビュー時に実行する。
+            - 完了時は PR 作成リンクの提示まで(PR 起票はオーナーが行う)。

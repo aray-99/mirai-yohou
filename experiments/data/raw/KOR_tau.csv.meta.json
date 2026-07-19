@@ -1,0 +1,1 @@
+{"source": "World Values Survey, E069_11 'Confidence: The Government'", "definition": "(A great deal + Quite a lot) / 有効回答(0-1)。year = 各波のフィールドワーク年", "aggregation": "ユーザーが WVS Online Analysis から転記・集計(JPN/THA と同手順)", "url": "https://www.worldvaluessurvey.org", "note": "Wave 6 (2010) / Wave 7 (2018) の 2 点(M13 #0077)", "placed_at": "2026-07-19"}

@@ -11,5 +11,10 @@ exclude_admin1 = [
     "Sirnak", "Hakkari", "Diyarbakir", "Mardin", "Tunceli", "Van",
     "Siirt", "Bitlis", "Bingol", "Agri", "Batman", "Mus",
 ]
+acled_from = 2016-01-01   # 実カバレッジ開始日(#0079)
 calib_from = 2016-01-01   # 確定(#0078。制約要因 = ACLED 開始年)
 calib_to = 2021-12-31     # 確定(#0078。制約要因 = WB 特許出願の終了年 2021)
+
+[hindcast]                 # M8 較正/検証ウィンドウ(1990年起点の年。#0079 で凍結)
+calib_t = [26.0, 30.0]     # 2016〜2020 = THA 型(較正窓を ACLED カバレッジに整合、PKKピーク+クーデター未遂を含む)
+verif_t = [30.0, 35.0]     # オリジン 30:33(4個)— ACLED 実カバー9年の制約(#0079)

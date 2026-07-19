@@ -33,7 +33,24 @@ include(joinpath(@__DIR__, "M8_hindcast.jl"))
         @test tha.exclude_admin1 == DEEP_SOUTH_THA
         @test tha.acled_from == date_to_t(Date(2010, 1, 1))
 
-        @test Set(keys(COUNTRY_CFG)) == Set(["JPN", "THA"])
+        @test Set(keys(COUNTRY_CFG)) == Set(["JPN", "THA", "KOR", "TUR"])
+    end
+
+    @testset "KOR/TUR が #0079 凍結値と一致" begin
+        kor = COUNTRY_CFG["KOR"]
+        @test kor.regime == :stable
+        @test kor.calib == (5.0, 26.0)          # JPN ミラー(#0079)
+        @test kor.verif == (26.0, 35.0)
+        @test kor.exclude_admin1 == String[]
+        @test kor.acled_from == date_to_t(Date(2018, 1, 1))
+
+        tur = COUNTRY_CFG["TUR"]
+        @test tur.regime == :volatile
+        @test tur.calib == (26.0, 30.0)          # THA 型・ACLED 整合(#0079)
+        @test tur.verif == (30.0, 35.0)
+        @test length(tur.exclude_admin1) == 12   # クルド12県(#0078)
+        @test "Sirnak" in tur.exclude_admin1
+        @test tur.acled_from == date_to_t(Date(2016, 1, 1))
     end
 
     @testset "[hindcast] 欠落国は明確なエラー(Issue #20 参照)" begin
@@ -56,20 +73,6 @@ include(joinpath(@__DIR__, "M8_hindcast.jl"))
         @test occursin("[hindcast]", err.msg)
     end
 
-    @testset "country_cfg: 実在する未確定国(KOR)も同じ明確なエラー" begin
-        # countries/KOR.toml は実在するが [hindcast] 未確定(Issue #20 待ち)。
-        # COUNTRY_CFG からは除外され(include は成功する)、参照時に
-        # KeyError でなく build_country_cfg の明確なエラーになること。
-        @test !haskey(COUNTRY_CFG, "KOR")
-        err = try
-            country_cfg("KOR")
-            nothing
-        catch e
-            e
-        end
-        @test err isa ErrorException
-        @test occursin("Issue #20", err.msg)
-    end
 end
 
 println("OK: COUNTRY_CFG TOML 駆動ローダ回帰テスト green")

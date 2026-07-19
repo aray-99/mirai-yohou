@@ -297,14 +297,23 @@ end
 
 if abspath(PROGRAM_FILE) == (@__FILE__)
     J = 16; iters = 3; N = 50
+    no_theta_sig = false
     for (i, a) in enumerate(ARGS)
         a == "--J" && (global J = parse(Int, ARGS[i + 1]))
         a == "--iters" && (global iters = parse(Int, ARGS[i + 1]))
         a == "--N" && (global N = parse(Int, ARGS[i + 1]))
+        # #0079: theta_sig の較正時扱いを #0055 の ΣN 規則に合わせて明示指定する
+        # ためのフラグ(既定 country != "JPN" は JPN 固有ハック。KOR のような
+        # 較正窓カバレッジゼロ国で使う)。未指定時は従来挙動のまま。
+        a == "--no-theta-sig" && (global no_theta_sig = true)
     end
     countries = [c for c in ARGS if haskey(COUNTRY_CFG, c)]
     isempty(countries) && (countries = ["THA", "JPN"])
     for c in countries
-        calibrate(c; J, iters, N)
+        if no_theta_sig
+            calibrate(c; J, iters, N, include_theta_sig = false)
+        else
+            calibrate(c; J, iters, N)
+        end
     end
 end

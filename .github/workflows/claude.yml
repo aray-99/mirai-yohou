@@ -46,15 +46,10 @@ jobs:
           # 開発フローは feature → develop(main はマイルストーン時のみ)。
           # 既定はデフォルトブランチ(main)起点のため明示する(PR #23 で顕在化)
           base_branch: develop
-          # 常時遵守事項の明示注入(CLAUDE.md 記載だけでは PR #25 で件名規約が
-          # 破られたため。DECISIONS 参照の書式・凍結ファイル・公開 HTML 不可侵)
-          prompt: |
-            以下は本リポジトリの常時遵守事項です(Issue 本文より優先):
-            - コミット件名は英語 Conventional Commits。件名に (#XXXX) 形式の
-              DECISIONS 参照を入れない(GitHub の issue/PR 参照と誤読される)。
-              参照は本文末尾の `Refs: docs/DECISIONS.md#XXXX` 行に書く。
-            - docs/dashboard/index.html は再生成・編集しない(オーナー実施)。
-            - 凍結ファイル(M8_frozen_config.toml、experiments/data/raw/ 配下)に
-              触れない。触れる必要が生じたら作業を止めて報告する。
-            - Julia はこの環境で実行不可。テストはオーナーがレビュー時に実行する。
-            - 完了時は PR 作成リンクの提示まで(PR 起票はオーナーが行う)。
+          # 注意: `prompt:` 入力は自動化モードに切り替わりトリガーコメント
+          # (タスク本文)を読まなくなるため使わない(#0089 で顕在化 — #27 の
+          # ランが 9 秒空振り)。常時遵守事項は --append-system-prompt で注入し
+          # tag モードを維持する。モデルは Fable 5 を明示(#0089、成果物品質)。
+          claude_args: |
+            --model claude-fable-5
+            --append-system-prompt "本リポジトリの常時遵守事項(Issue 本文より優先): (1) コミット件名は英語 Conventional Commits。件名に (#XXXX) 形式の DECISIONS 参照を入れない(GitHub の issue/PR 参照と誤読される)。参照は本文末尾の `Refs: docs/DECISIONS.md#XXXX` 行に書く。 (2) docs/dashboard/index.html は再生成・編集しない(オーナー実施)。 (3) 凍結ファイル(M8_frozen_config.toml、experiments/data/raw/ 配下)に触れない。触れる必要が生じたら作業を止めて報告する。 (4) Julia はこの環境で実行不可。テストはオーナーがレビュー時に実行する。 (5) 完了時は PR 作成リンクの提示まで(PR 起票はオーナーが行う)。"

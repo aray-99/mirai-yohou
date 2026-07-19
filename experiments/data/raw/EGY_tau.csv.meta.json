@@ -1,0 +1,8 @@
+{
+  "source": "World Values Survey, E069_11 'Confidence: The Government'",
+  "definition": "(A great deal + Quite a lot) / 有効回答(0-1)。year = 各波のフィールドワーク年",
+  "aggregation": "Claude(Cowork)がWVS Online AnalysisのTime Series機能(Show Column % excluding DK/NA)から転記・集計(JPN/THA/KOR/TURと同手順)",
+  "url": "https://www.worldvaluessurvey.org",
+  "note": "取得できた波: Wave 4 (1999-2004, Egypt実査年2001, N=3000) value=0.608 / Wave 6 (2010-2014, Egypt実査年2013, N=1523) value=0.398。欠測: Wave 5 (2005-2009, Egypt実査年2008) はE069_11の有効回答N=0のため欠測。Wave 7 (2017-2022, Egypt実査年2018) はEgyptが国としては参加しているが、この設問(Q71)の有効回答N=0のため欠測(=Wave7参加状況の確認結果:設問自体が非実施/未収録)。Wave 1-3 (1981-1998) はEgyptがWVSに未参加のため対象外。補間は行っていない。",
+  "placed_at": "2026-07-20"
+}

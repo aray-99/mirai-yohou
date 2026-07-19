@@ -1,0 +1,8 @@
+{
+  "source": "World Values Survey, E069_11 'Confidence: The Government'",
+  "definition": "(A great deal + Quite a lot) / 有効回答(0-1)。year = 各波のフィールドワーク年",
+  "aggregation": "Claude(Cowork)がWVS Online AnalysisのTime Series機能(Show Column % excluding DK/NA)から転記・集計(JPN/THA/KOR/TURと同手順)",
+  "url": "https://www.worldvaluessurvey.org",
+  "note": "取得できた波: Wave 5 (2005-2009, Malaysia実査年2006, N=1201) value=0.754 / Wave 6 (2010-2014, Malaysia実査年2012, N=1300) value=0.752 / Wave 7 (2017-2022, Malaysia実査年2018, N=1313) value=0.502。Malaysiaは同一設問でWave5/6/7すべてに有効回答があり、Wave1-4には国自体が不参加。補間は行っていない。",
+  "placed_at": "2026-07-20"
+}

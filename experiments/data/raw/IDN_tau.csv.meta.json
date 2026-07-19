@@ -1,0 +1,8 @@
+{
+  "source": "World Values Survey, E069_11 'Confidence: The Government'",
+  "definition": "(A great deal + Quite a lot) / 有効回答(0-1)。year = 各波のフィールドワーク年",
+  "aggregation": "Claude(Cowork)がWVS Online AnalysisのTime Series機能(Show Column % excluding DK/NA)から転記・集計(JPN/THA/KOR/TURと同手順)",
+  "url": "https://www.worldvaluessurvey.org",
+  "note": "取得できた波: Wave 4 (1999-2004, Indonesia実査年2001, N=1000) value=0.524 / Wave 5 (2005-2009, Indonesia実査年2006, N=2015) value=0.560 / Wave 7 (2017-2022, Indonesia実査年2018, N=3200) value=0.791。欠測: Wave 6 (2010-2014) はIndonesiaが不参加(国選択肢に存在せず)。Wave1-3もIndonesia不参加。補間は行っていない。",
+  "placed_at": "2026-07-20"
+}

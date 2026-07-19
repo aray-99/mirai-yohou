@@ -1,0 +1,8 @@
+{
+  "source": "World Values Survey, E069_11 'Confidence: The Government'",
+  "definition": "(A great deal + Quite a lot) / 有効回答(0-1)。year = 各波のフィールドワーク年",
+  "aggregation": "Claude(Cowork)がWVS Online AnalysisのTime Series機能(Show Column % excluding DK/NA)から転記・集計(JPN/THA/KOR/TURと同手順)",
+  "url": "https://www.worldvaluessurvey.org",
+  "note": "取得できた波: Wave 3 (1995-1999, Philippines実査年1996, N=1200) value=0.587 / Wave 4 (1999-2004, Philippines実査年2001, N=1200) value=0.510 / Wave 6 (2010-2014, Philippines実査年2012, N=1200) value=0.578 / Wave 7 (2017-2022, Philippines実査年2019, N=1200) value=0.816。欠測: Wave 5 (2005-2009) はPhilippinesが不参加(国選択肢に存在せず)。Wave1-2もPhilippines不参加。補間は行っていない。",
+  "placed_at": "2026-07-20"
+}

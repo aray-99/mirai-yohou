@@ -1047,3 +1047,12 @@
 - 是正 3(品質向上、ユーザー指示): k16shikano 氏の日本語ライティング規範 skill 2 本(cognitive-rhythm-writing / japanese-tech-writing、Unlicense 宣言確認済み)を `.claude/skills/` に原文のまま収載(来歴 = .claude/skills/README.md)。ランナー上の Claude Code が repo checkout から自動発見する。#27 再委譲コメントで明示的にロードを指示。
 - 反映: develop にコミット後、**該当コミットのみ main へ cherry-pick**(ワークフロー定義と skill はデフォルトブランチから読まれるため。develop 全体のマージはマイルストーン外のため行わない)。
 - 関連: DECISIONS #0076。Issue #27。run 29680328976(障害の証跡)
+
+## [0090] EGY EKI 較正値の凍結(Issue #33、#0088 手順①②)
+
+- 日付: 2026-07-20(#0039 に基づく事後報告対象。結果を見た後の変更禁止)
+- 実行: M8_calibrate.jl EGY、J=24 / iters=4 / N=100 / シード 20260710 / 窓 [21,29]、コード 9d140ea。exit=0(ログ experiments/output/EGY_calib_20260720.log、結果 M8_calib_EGY.json)。iter 4 で有効メンバー 19/24・平均ミスフィット 78.8→50.2 に収束。
+- 凍結値(M8_frozen_config.toml [EGY]): ν* = 17.63、eta_g = 0.855、mu_gbar = 0.138、delta_sig = 0.038、mu_p = 0.317、c_v0 = 8.43、lam0 = 0.463。
+- オーナー検分: ν は THA 4.2 → TUR 12.2 → EGY 17.6 と紛争烈度順に整合(除外後も革命期スパイクを含む窓として妥当な過分散)。mu_p・delta_sig は TUR と同帯、lam0/c_v0 の高さは較正窓のジャンプクラスタ(強制ジャンプ 11 週)と整合。異常値・退化なし。
+- 次: M10_walkforward.jl EGY(オリジン 29:33、--mu-gbar-sd 0.3、シード既定 20260711)→ #0052 判定。
+- 関連: DECISIONS #0050 / #0080 / #0088。Issue #33

@@ -1,0 +1,10 @@
+# 国別データ設定(Issue #33、DECISIONS #0086)。書式は countries/README.md 参照。
+name_en = "Egypt"    # ACLED / WB の英語国名
+regime = "volatile"  # 仮値 — 診断(DECISIONS 手順2)で確定
+
+[acled]
+year_from = 1997                 # fetch_acled の取得開始年(アフリカ収録開始見込み。実カバレッジは acled_from 参照)
+exclude_admin1 = []               # 仮 — 診断で確定
+acled_from = 1997-01-01           # 実データ確認済み(EGY_events.csv date_range 1997-01-03–2025-07-17)
+calib_from = 2015-01-01           # 仮値 — 診断で確定
+calib_to = 2021-12-31             # 仮値 — 診断で確定

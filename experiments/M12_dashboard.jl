@@ -1382,7 +1382,7 @@ function main(args::Vector{String})
     end
 
     if isempty(iso3_list)
-        iso3_list = ["JPN", "THA"]
+        iso3_list = ["JPN", "THA", "KOR", "TUR"]
     end
 
     json_paths = String[]

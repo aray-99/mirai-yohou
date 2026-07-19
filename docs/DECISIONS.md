@@ -1037,3 +1037,13 @@
 - 付随コード変更(本エントリ直後にコミット): EGY.toml への [hindcast] 追記、M9_ORIGINS への EGY => 29:33 追加、test_m8_hindcast_country_cfg.jl の期待値更新(EGY が確定国になるため)。
 - 実行順と ETA(M13 実測準拠): ① EGY EKI 較正(30〜60 分)→ ② オーナー検分・凍結 → ③ M10 walk-forward(5 オリジン ≈1.3〜1.5h)→ ④ 判定(#0039 事後報告)。>30 分ランは setsid + 完了マーカーで切り離し。
 - 関連: DECISIONS #0050 / #0052 / #0055 / #0062 / #0069 / #0070 / #0079 / #0086 / #0087。Issue #33 / #35
+
+## [0089] 友人委譲ワークフローの是正 — prompt 入力バグの修正 + Fable 5 明示 + ライティング skill 導入(Issue #27)
+
+- 日付: 2026-07-20(ユーザー承認済み: 「必要な是正は承認します」+ skill 導入・Fable 5 明示の指示)
+- 障害: 5b0a15e(#0076 追補の常時遵守事項注入)が claude-code-action@v1 の `prompt:` 入力を使用 → 同入力は**自動化モードへの切替**でありトリガーコメント(タスク本文)を読まなくなる。#27 の初回ラン(2026-07-19、run 29680328976)は遵守事項のみを受け取り 9.3 秒・3 ターンで空振り(success 表示だが成果物ゼロ)。注入導入後の初回起動で顕在化。
+- 是正 1(バグ修正): 遵守事項の注入を `claude_args: --append-system-prompt` に移し、tag モード(Issue/コメントをタスクとして読む)を復元。
+- 是正 2(品質向上、ユーザー指示): `--model claude-fable-5` を明示指定。友人トークンのプランで Fable 5 が使えない場合はランが失敗するので、その際は --model 行のみ除去して既定モデルへ戻す(フォールバック手順)。
+- 是正 3(品質向上、ユーザー指示): k16shikano 氏の日本語ライティング規範 skill 2 本(cognitive-rhythm-writing / japanese-tech-writing、Unlicense 宣言確認済み)を `.claude/skills/` に原文のまま収載(来歴 = .claude/skills/README.md)。ランナー上の Claude Code が repo checkout から自動発見する。#27 再委譲コメントで明示的にロードを指示。
+- 反映: develop にコミット後、**該当コミットのみ main へ cherry-pick**(ワークフロー定義と skill はデフォルトブランチから読まれるため。develop 全体のマージはマイルストーン外のため行わない)。
+- 関連: DECISIONS #0076。Issue #27。run 29680328976(障害の証跡)

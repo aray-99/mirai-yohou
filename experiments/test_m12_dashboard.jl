@@ -13,6 +13,8 @@ include(joinpath(@__DIR__, "M12_dashboard.jl"))
 const FIXTURE_DIR = joinpath(@__DIR__, "test_fixtures")
 const AAA_PATH = joinpath(FIXTURE_DIR, "M11_forecast_AAA.json")
 const BBB_PATH = joinpath(FIXTURE_DIR, "M11_forecast_BBB.json")
+const CCC_PATH = joinpath(FIXTURE_DIR, "M11_forecast_CCC.json")
+const DDD_PATH = joinpath(FIXTURE_DIR, "M11_forecast_DDD.json")
 
 @testset "M12 dashboard generator (#0074, Issue #11/#14/#15)" begin
 
@@ -111,6 +113,31 @@ const BBB_PATH = joinpath(FIXTURE_DIR, "M11_forecast_BBB.json")
         # 決め打ちだったため、320px 幅パネルでは実質 4px 台まで縮んでいた)。
         @test occursin("AXIS_FONT_SIZE = \"11px\"", html)
         @test !occursin("font-size: 9px", html)
+    end
+
+    @testset "7. 4 国入力(M13-D、KOR/TUR 追加相当)" begin
+        # 実 KOR/TUR の M11 予報 JSON は git 管理外(docs/FORECAST_JSON.md)のため、
+        # CCC/DDD フィクスチャ(AAA/BBB 流用、country フィールドのみ差し替え)で
+        # 「3・4 国目の追加」を代替検証する。build_dashboard_html は入力パス配列の
+        # 純関数なので、フィクスチャの国コードが実際の ISO3 と異なっても
+        # 4 国分岐(生成成功・国ごとの独立性)の検証としては十分である。
+        html4 = build_dashboard_html([AAA_PATH, BBB_PATH, CCC_PATH, DDD_PATH])
+        @test html4 isa String
+
+        n_data_scripts = length(collect(eachmatch(r"<script type=\"application/json\" id=\"data-", html4)))
+        @test n_data_scripts == 4
+
+        n_tabs = length(collect(eachmatch(r"class=\"country-tab\" data-country=", html4)))
+        @test n_tabs == 4
+
+        for path in (AAA_PATH, BBB_PATH, CCC_PATH, DDD_PATH)
+            @test occursin(read(path, String), html4)
+        end
+
+        # 決定性: 同一の4国入力を2回生成してバイト一致すること。
+        html4_again = build_dashboard_html([AAA_PATH, BBB_PATH, CCC_PATH, DDD_PATH])
+        @test html4 == html4_again
+        @test codeunits(html4) == codeunits(html4_again)
     end
 
 end

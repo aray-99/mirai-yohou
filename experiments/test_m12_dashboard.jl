@@ -15,6 +15,7 @@ const AAA_PATH = joinpath(FIXTURE_DIR, "M11_forecast_AAA.json")
 const BBB_PATH = joinpath(FIXTURE_DIR, "M11_forecast_BBB.json")
 const CCC_PATH = joinpath(FIXTURE_DIR, "M11_forecast_CCC.json")
 const DDD_PATH = joinpath(FIXTURE_DIR, "M11_forecast_DDD.json")
+const EEE_PATH = joinpath(FIXTURE_DIR, "M11_forecast_EEE.json")
 
 @testset "M12 dashboard generator (#0074, Issue #11/#14/#15)" begin
 
@@ -138,6 +139,31 @@ const DDD_PATH = joinpath(FIXTURE_DIR, "M11_forecast_DDD.json")
         html4_again = build_dashboard_html([AAA_PATH, BBB_PATH, CCC_PATH, DDD_PATH])
         @test html4 == html4_again
         @test codeunits(html4) == codeunits(html4_again)
+    end
+
+    @testset "8. 5 国入力(M13-C EGY 追加相当)" begin
+        # 実 EGY の M11 予報 JSON は git 管理外(docs/FORECAST_JSON.md)のため、
+        # EEE フィクスチャ(CCC 流用、country フィールドのみ差し替え)で
+        # 「5 国目の追加」を代替検証する。build_dashboard_html は入力パス配列の
+        # 純関数なので、フィクスチャの国コードが実際の ISO3 と異なっても
+        # 5 国分岐(生成成功・国ごとの独立性)の検証としては十分である。
+        html5 = build_dashboard_html([AAA_PATH, BBB_PATH, CCC_PATH, DDD_PATH, EEE_PATH])
+        @test html5 isa String
+
+        n_data_scripts = length(collect(eachmatch(r"<script type=\"application/json\" id=\"data-", html5)))
+        @test n_data_scripts == 5
+
+        n_tabs = length(collect(eachmatch(r"class=\"country-tab\" data-country=", html5)))
+        @test n_tabs == 5
+
+        for path in (AAA_PATH, BBB_PATH, CCC_PATH, DDD_PATH, EEE_PATH)
+            @test occursin(read(path, String), html5)
+        end
+
+        # 決定性: 同一の5国入力を2回生成してバイト一致すること。
+        html5_again = build_dashboard_html([AAA_PATH, BBB_PATH, CCC_PATH, DDD_PATH, EEE_PATH])
+        @test html5 == html5_again
+        @test codeunits(html5) == codeunits(html5_again)
     end
 
 end
